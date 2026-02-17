@@ -1,20 +1,40 @@
-# CFR IRIS Scraper: Romanian Railways API
+# CFR Train Tracker Backend API
 
-![Screenshot](screen.png)
+This is the backend service for the Train Tracker application, providing data about Romanian Railways (CFR) trains.
 
-CFR S.A., the Romanian national railway infrastructure administration company offers an online live information service
-(based on ASPX forms with postback viewstate sending and event validation) for getting **near real-time data** about
-departures, arrivals and platforms where trains arrive in stations and trip delays and updates. At the time, this whole
- system lacks and API or even a decent, easy to use and easy to find interface for end users. 
+## 🚀 How it Works
 
-This Flask based API extracts data from the CFR webapp as requested in the URL API Endpoint and outputs reusable JSON data.
-The program scrapes all its information from ASP.Net's __VIEWSTATE variable.
+The API uses a **hybrid data approach** to provide the best possible information:
 
-## Installation & Requirments
-- You need Python 3.6+ and Pipenv installed on your system.
-```sh
-$ apt install python3 python3-pip
-$ pip3 install pipenv
+1.  **Government Open Data (Base)**: 
+    - Uses the official XML dataset from `data.gov.ro` (e.g., `trenuri-2025-2026_sntfc.xml`) for the static timetable, routes, and station lists.
+    - This provides fast, reliable, and offline-capable schedule data.
+
+2.  **Live Scraping (Real-time)**:
+    - Scrapes `mersultrenurilor.infofer.ro` on-demand to fetch **live delays** and real-time status updates.
+    - Live data is fetched when a user views a specific train's details, ensuring up-to-the-minute accuracy without overloading the server.
+
+## ✨ Features
+
+- **Hybrid Data Engine**: Combines static XML schedules with dynamic live web scraping.
+- **SQLite Database**: Stores passenger reports, tips, and crowd-sourced data.
+- **REST API**: Provides JSON endpoints for:
+    - Station timetables (arrivals/departures)
+    - Train routes and stops
+    - Live delays (calculated from real-time sources)
+    - Passenger reporting system (crowding, delays, tips)
+
+## 🛠️ Installation & Requirements
+
+- Python 3.8+
+- Flask
+- BeautifulSoup4 (for scraping)
+- Requests
+
+```bash
+# Install dependencies
+pip install pipenv
+pipenv install
 ```
 - Clone the repository and install the module dependencies:
 ```sh

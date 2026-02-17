@@ -3,255 +3,169 @@ from src import config
 import requests_html
 from datetime import datetime, timedelta
 import re
+from bs4 import BeautifulSoup
+import requests
 
-base_url = "https://appiris.infofer.ro/MyTrainRO.aspx?tren={}"
+# Updated to use the working mersultrenurilor site
+base_url = "https://mersultrenurilor.infofer.ro/ro-RO/Tren/{}"
 
 
 def get_station_id_by_name(name):
     if name in config.global_station_list:
         return config.global_station_list[name]
-
     return None
 
 
-def extract_viewstate(reply):
-    state = reply.html.find('#__VIEWSTATE', first=True)
-
-    if not state:
-        raise Exception("__VIEWSTATE element not present on webpage")
-
-    state_value = state.attrs['value']
-
-    return state_value
-
-
-def state_decoder(state):
-    main_page = state[0][1][1][1][1][3][1][1][1]
-
-    departure_date_raw = main_page[13][0][0][0][7]
-    departure_date = re.findall(r"(\d+.\d+.\d+)", departure_date_raw)[0]
-
-    # Collect the info box details
-    info_box = main_page[13][1][1][1]
-
-    # Process the latest info field
-    latest_info_raw = info_box[13][1][1][0][0][1]
-    info_station, info_status = re.findall(r"(.*?) \[(.*?)\]", latest_info_raw)[0]
-    info_station = info_station.strip()
-
-    # Process the last update time
-    info_time_raw = info_box[15][1][1][0][0][1]
-    info_time = None
-    if info_time_raw and info_time_raw != '&nbsp;':
-        info_time = datetime.timestamp(datetime.strptime(info_time_raw, '%d.%m.%Y %H:%M'))
-
-    # Process the delay field
-    delay_raw = info_box[17][1][1][0][0][1]
-    delay = None
-    if delay_raw != '':
-        delay = int(delay_raw)
-
-    # Process the next stop information
-    next_station_raw = info_box[23][1][1][0][0][1]
-    next_station = next_station_raw.strip()
-
-    # Process the next stop time
-    next_stop_time_raw = info_box[25][1][1][0][0][1]
-    next_stop_time = None
-    if next_stop_time_raw and next_stop_time_raw != '&nbsp;':
-        next_stop_time = datetime.timestamp(datetime.strptime(next_stop_time_raw, '%d.%m.%Y %H:%M'))
-
-    # Other information
-    destination_station = info_box[19][1][1][0][0][1]
-
-    destination_arrival_time_raw = info_box[21][1][1][0][0][1]
-    destination_arrival_time = None
-    if destination_arrival_time_raw and destination_arrival_time_raw != '&nbsp;':
-        destination_arrival_time = datetime.timestamp(datetime.strptime(destination_arrival_time_raw, '%d.%m.%Y %H:%M'))       
-
-    # Build the data dict
-    info_box_data = {
-        'rank': info_box[3][1][1][0][0][1],
-        'train_id': info_box[5][1][1][0][0][1],
-        'operator': info_box[7][1][1][0][0][1],
-        'route': info_box[9][1][1][0][0][1],
-        'status': info_box[11][1][1][0][0][1],
-        'latest_information': {
-            'station': {
-                'name': info_station,
-                'id': get_station_id_by_name(info_station),
-            },
-            'status': info_status,
-            'time': int(info_time) if info_time else None,
-        },
-        'delay': delay,
-        'destination': {
-            'station': {
-                'name': destination_station,
-                'id': get_station_id_by_name(destination_station)
-            },
-            'arrival_time': int(destination_arrival_time) if destination_arrival_time else None
-        },
-        'next_stop': {
-            'station': {
-                'name': next_station,
-                'id': get_station_id_by_name(next_station),
-            },
-            'time': int(next_stop_time) if next_stop_time else None,
-        },
-        'distance': info_box[27][1][1][0][0][1][:-1],
-        'trip_duration': info_box[29][1][1][0][0][1][:-1],
-        'average_speed': info_box[31][1][1][0][0][1][:-1],
-    }
-
-    # Collect the route info box data, if available
-    # Note: The route info is not displayed for canceled trains,
-    # yet it is available in the state information, albeit at a different place
-    # in the structure
-
-    route_data = []
-    route_info_box = None
-
-    # Find the route info box
-    try:
-        route_info_box = main_page[17][1][1][1]
-    except TypeError:
-        try:
-            # The route info box is usually found here on cancelled trains
-            route_info_box = main_page[15][1][1][1]
-        except TypeError:
-            pass
-
-    if route_info_box:
-        last_arrival_timestamp = 0
-        last_departure_timestamp = 0
-
-        for entry_number in range(1, int(len(route_info_box) / 2)):
-            entry = route_info_box[2 * entry_number - 1][1]
-
-            # Compute the arrival timestamp for this station
-            arrival_time_raw = entry[5][0][0][1]
-            arrival_timestamp = None
-
-            if arrival_time_raw and arrival_time_raw != '&nbsp;':
-                # We assume the train arrives at this station on the same day it left
-                arrival_time_assumption = datetime.strptime(departure_date + ' ' + arrival_time_raw, '%d.%m.%Y %H:%M')
-
-                if last_arrival_timestamp and last_arrival_timestamp > datetime.timestamp(arrival_time_assumption):
-                    # We were wrong in our assumption and the train actually arrives
-                    # on the next day at this station, hence we must add one day to the arrival time
-                    arrival_time_assumption = arrival_time_assumption + timedelta(days=1)
-
-                last_arrival_timestamp = datetime.timestamp(arrival_time_assumption)
-                arrival_timestamp = int(last_arrival_timestamp)
-
-            # Compute the departure timestamp for this station
-            departure_time_raw = entry[9][0][0][1]
-            departure_timestamp = None
-
-            if departure_time_raw and departure_time_raw != '&nbsp;':
-                # We assume the train departs from this station on the same day it left
-                departure_time_assumption = datetime.strptime(departure_date + ' ' + departure_time_raw, '%d.%m.%Y %H:%M')
-
-                if last_departure_timestamp and last_departure_timestamp > datetime.timestamp(departure_time_assumption):
-                    # We were wrong in our assumption and the train actually departs
-                    # on the next day from this station, hence we must add one day to the departure time
-                    departure_time_assumption = departure_time_assumption + timedelta(days=1)
-
-                last_departure_timestamp = datetime.timestamp(departure_time_assumption)
-                departure_timestamp = int(last_departure_timestamp)
-
-            # Decode other raw data
-            milepost_raw = entry[1][0][0][1]
-            milepost = None
-            if milepost_raw:
-                milepost = int(milepost_raw)
-
-            station = entry[3][0][0][1].strip()
-
-            stop_duration_raw = entry[7][0][0][1]
-            stop_duration = None
-            if stop_duration_raw and stop_duration_raw != "&nbsp;":
-                stop_duration = int(stop_duration_raw)
-
-            delay_raw = entry[13][0][0][1]
-            delay = 0
-            if delay_raw and delay_raw != "&nbsp;":
-                delay = int(delay_raw)
-
-            mentions_raw = entry[15][0][0][1]
-            mentions = None
-            if mentions_raw and mentions_raw != "&nbsp;":
-                mentions = mentions_raw
-
-            entry_data = {
-                'milepost': milepost,
-                'station': {
-                    'name': station,
-                    'id': get_station_id_by_name(station),
-                },
-                'arrival_time': arrival_timestamp,
-                'stop_duration': stop_duration,
-                'departure_time': departure_timestamp,
-                'is_real_time': entry[11][0][0][1] == 'Real',
-                'delay': delay,
-                'mentions': mentions,
-            }
-
-            try:
-                entry_data['mentions_extra'] = entry[15][0][1][1]
-            except TypeError:
-                entry_data['mentions_extra'] = None
-
-            route_data.append(entry_data)
-
-    return {
-        'departure_date': departure_date,
-        'info_box': info_box_data,
-        'route_data': route_data,
-    }
+def clean_train_number(train_id):
+    """Clean train number for URL format: extract only the numeric part"""
+    match = re.search(r'\d+', train_id)
+    if match:
+        return match.group(0)
+    return train_id.strip().replace(' ', '')
 
 
 def get_train(train_id):
-    session = requests_html.HTMLSession()
+    """
+    Get real train information from mersultrenurilor.infofer.ro
+    """
+    return get_real_train_data(train_id)
 
-    # Get the initial page and retrieve its __VIEWSTATE
-    reply = session.get(base_url.format(train_id))
-    state_value = extract_viewstate(reply)
-    vs = ViewState(state_value)
-    state = vs.decode()
 
-    # Check whether the train actually exists
-    if state[0][1][1][1][1][3][1][1][1][11][0][0][1] != '':
-        raise Exception("Train not found")
+def get_real_train_data(train_id):
+    """
+    Get real train data from mersultrenurilor.infofer.ro with live delays
+    Uses AJAX to get actual train data with delay information
+    """
+    
+    try:
+        # Use numeric train ID 
+        numeric_train_id = clean_train_number(train_id)
+        url = base_url.format(numeric_train_id)
+        
+        print(f"Fetching train data from mersultrenurilor: {url}")
+        
+        # Step 1: Get the initial page to extract form data
+        response = requests.get(url, timeout=15)
+        response.raise_for_status()
+        
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Extract form data for AJAX request
+        form_data = {}
+        for field in ['Date', 'TrainRunningNumber', 'SelectedBranchCode', 'ReCaptcha', 
+                      'ConfirmationKey', '__RequestVerificationToken']:
+            input_field = soup.find('input', {'name': field}) or soup.find('input', {'id': field})
+            if input_field:
+                form_data[field] = input_field.get('value', '')
+        
+        # Add hidden fields
+        form_data['IsSearchWanted'] = soup.find('input', {'id': 'input-is-search-wanted'}).get('value', 'False')
+        form_data['IsReCaptchaFailed'] = soup.find('input', {'id': 'input-recaptcha-failed'}).get('value', 'False')
+        
+        # Step 2: POST to get actual train data via AJAX
+        result_url = "https://mersultrenurilor.infofer.ro/ro-RO/Trains/TrainsResult"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Referer': url
+        }
+        
+        result_response = requests.post(result_url, data=form_data, headers=headers, timeout=15)
+        result_response.raise_for_status()
+        
+        result_soup = BeautifulSoup(result_response.content, 'html.parser')
+        
+        # Step 3: Parse all branches. The page has one button + div pair per branch.
+        # Buttons have id="button-group-XXXXX", divs have id="div-stations-branch-XXXXX".
+        # We parse every branch and return them all so the frontend can offer a selector.
 
-    trips = []
+        def parse_stations_from_div(branch_div):
+            stops = []
+            for item in branch_div.find_all('li', class_='list-group-item'):
+                station_link = item.find('a', href=lambda x: x and '/ro-RO/Statie/' in x)
+                if not station_link:
+                    continue
+                station_name = station_link.get_text(strip=True)
+                time_divs = item.find_all('div', class_='text-1-3rem')
+                arrival_time = time_divs[0].get_text(strip=True) if len(time_divs) > 0 else None
+                departure_time = time_divs[1].get_text(strip=True) if len(time_divs) > 1 else arrival_time
+                delay_divs = item.find_all('div', class_=['color-firebrick', 'color-darkgreen'])
+                delay_minutes = 0
+                if delay_divs:
+                    for delay_div in delay_divs:
+                        delay_text = delay_div.get_text(strip=True)
+                        if 'la timp' in delay_text.lower():
+                            delay_minutes = 0
+                            break
+                        delay_match = re.search(r'([+\-]\d+)\s*min', delay_text)
+                        if delay_match:
+                            delay_minutes = int(delay_match.group(1))
+                            break
+                stops.append({
+                    'station_name': station_name,
+                    'arrival_time': arrival_time,
+                    'departure_time': departure_time,
+                    'delay': delay_minutes
+                })
+            return stops
 
-    # Decode the current page and append it to the trips array
-    current_trip = state_decoder(state)
-    trips.append(current_trip)
+        branch_divs = result_soup.find_all('div', id=lambda x: x and x.startswith('div-stations-branch-'))
+        branches = []
 
-    # Check whether the train is single-page or multi-page
-    if state[1]['DetailsView1'][0][6] == 1:
-        print("Single-page train")
-    else:
-        print("Multi-page train!")
+        for branch_div in branch_divs:
+            branch_id = branch_div['id'].replace('div-stations-branch-', '')
+            # Find the matching button for the label
+            button = result_soup.find('button', id=f'button-group-{branch_id}')
+            label = 'Rută'
+            if button:
+                # Label is the full text of the button, e.g. "Tren principal\nBucurești Nord → Cluj Napoca"
+                # Sometimes the arrow is a separate element, giving 3 parts instead of 2.
+                parts = [p.strip() for p in button.get_text(separator='\n').split('\n') if p.strip()]
+                # Filter out bare arrow characters that may appear as their own part
+                parts = [p for p in parts if p not in ('→', '->', '–', '►')]
+                if len(parts) >= 2:
+                    label = f"{parts[0]} · {' → '.join(parts[1:])}"
+                elif parts:
+                    label = parts[0]
+                else:
+                    label = 'Rută'
 
-        # Switch the page
-        reply = session.post(base_url.format(train_id), data={
-            '__EVENTTARGET': 'DetailsView1',
-            '__EVENTARGUMENT': 'Page$2',
-            '__VIEWSTATE': state_value,
-            '__VIEWSTATEGENERATOR': '86BE64DB',
-            'TextTrnNo': str(train_id),
-        })
+            stops = parse_stations_from_div(branch_div)
+            if stops:
+                branches.append({'label': label, 'stations_data': stops})
 
-        state_value = extract_viewstate(reply)
-        vs = ViewState(state_value)
-        state = vs.decode()
+        # Fallback: if no branch divs found, parse everything
+        if not branches:
+            all_items = result_soup.find_all('li', class_='list-group-item')
+            stops = []
+            for item in all_items:
+                station_link = item.find('a', href=lambda x: x and '/ro-RO/Statie/' in x)
+                if not station_link:
+                    continue
+                station_name = station_link.get_text(strip=True)
+                time_divs = item.find_all('div', class_='text-1-3rem')
+                arrival_time = time_divs[0].get_text(strip=True) if len(time_divs) > 0 else None
+                departure_time = time_divs[1].get_text(strip=True) if len(time_divs) > 1 else arrival_time
+                stops.append({'station_name': station_name, 'arrival_time': arrival_time,
+                              'departure_time': departure_time, 'delay': 0})
+            if stops:
+                branches.append({'label': 'Rută', 'stations_data': stops})
 
-        # Decode the current page and append it to the trips array
-        current_trip = state_decoder(state)
-        trips.append(current_trip)
+        if not branches:
+            raise Exception("No station data found in AJAX result")
 
-    return trips
+        # For backward-compat: expose the longest branch as the default `stations_data`
+        stations_data = max(branches, key=lambda b: len(b['stations_data']))['stations_data']
+
+        print(f"Found {len(branches)} branch(es), {len(stations_data)} stations in main branch")
+        
+        return {
+            'train_number': numeric_train_id,
+            'stations_data': stations_data,
+            'branches': branches,
+            'category': train_id.replace(numeric_train_id, '').strip(),
+            'data_source': 'mersultrenurilor_live'
+        }
+    
+    except Exception as e:
+        print(f"Error fetching real train data from mersultrenurilor: {e}")
+        raise

@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CFR Data Testing - Train Tracker</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100 min-h-screen" x-data="cfrTestApp()">
+    <div class="container mx-auto px-4 py-8">
+        <!-- Header -->
+        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h1 class="text-2xl font-bold text-gray-800">CFR Data Testing</h1>
+                    <p class="text-gray-600">Test real CFR data fetching and integration</p>
+                </div>
+                <a href="/" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg transition-colors">
+                    <i class="fas fa-arrow-left mr-2"></i>Back to App
+                </a>
+            </div>
+        </div>
+
+        <!-- CFR Status -->
+        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+            <h2 class="text-xl font-semibold mb-4">CFR Connection Status</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div class="bg-gray-50 p-4 rounded-lg">
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm font-medium text-gray-700">CFR Website</span>
+                        <span x-show="cfrStatus.website_accessible" class="text-green-600">
+                            <i class="fas fa-check-circle"></i>
+                        </span>
+                        <span x-show="!cfrStatus.website_accessible" class="text-red-600">
+                            <i class="fas fa-times-circle"></i>
+                        </span>
+                    </div>
+                    <div class="text-xs text-gray-500 mt-1" x-text="cfrStatus.website_accessible ? 'Accessible' : 'Not accessible'"></div>
+                </div>
+                
+                <div class="bg-gray-50 p-4 rounded-lg">
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm font-medium text-gray-700">Station Data</span>
+                        <span x-show="cfrStatus.stations_fetchable" class="text-green-600">
+                            <i class="fas fa-check-circle"></i>
+                        </span>
+                        <span x-show="!cfrStatus.stations_fetchable" class="text-red-600">
+                            <i class="fas fa-times-circle"></i>
+                        </span>
+                    </div>
+                    <div class="text-xs text-gray-500 mt-1" x-text="cfrStatus.stations_fetchable ? 'Available' : 'Not available'"></div>
+                </div>
+                
+                <div class="bg-gray-50 p-4 rounded-lg">
+                    <div class="flex items-center justify-between">
+                        <span class="text-sm font-medium text-gray-700">Train Data</span>
+                        <span x-show="cfrStatus.trains_fetchable" class="text-green-600">
+                            <i class="fas fa-check-circle"></i>
+                        </span>
+                        <span x-show="!cfrStatus.trains_fetchable" class="text-red-600">
+                            <i class="fas fa-times-circle"></i>
+                        </span>
+                    </div>
+                    <div class="text-xs text-gray-500 mt-1" x-text="cfrStatus.trains_fetchable ? 'Available' : 'Not available'"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Station Testing -->
+        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+            <h2 class="text-xl font-semibold mb-4">Station Data Testing</h2>
+            <div class="mb-4">
+                <button @click="testStations()" 
+                        :disabled="testingStations"
+                        class="bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 text-white px-4 py-2 rounded-lg transition-colors">
+                    <span x-show="!testingStations">
+                        <i class="fas fa-play mr-2"></i>Test Station Fetching
+                    </span>
+                    <span x-show="testingStations">
+                        <i class="fas fa-spinner fa-spin mr-2"></i>Testing...
+                    </span>
+                </button>
+            </div>
+            
+            <div x-show="stationResults" class="mt-4">
+                <div class="bg-gray-50 p-4 rounded-lg">
+                    <h3 class="font-medium mb-2">Results:</h3>
+                    <div class="text-sm space-y-2">
+                        <div class="flex justify-between">
+                            <span>Data Source:</span>
+                            <span x-text="stationResults?.source" class="font-mono"></span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span>Stations Found:</span>
+                            <span x-text="stationResults?.count" class="font-mono"></span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span>Real CFR Attempted:</span>
+                            <span x-text="stationResults?.cfr_attempted ? 'Yes' : 'No'" class="font-mono"></span>
+                        </div>
+                    </div>
+                    
+                    <details class="mt-4">
+                        <summary class="cursor-pointer text-blue-600 hover:text-blue-800">Show Raw Data</summary>
+                        <pre class="mt-2 text-xs bg-gray-100 p-2 rounded overflow-x-auto" x-text="JSON.stringify(stationResults, null, 2)"></pre>
+                    </details>
+                </div>
+            </div>
+        </div>
+
+        <!-- Train Testing -->
+        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+            <h2 class="text-xl font-semibold mb-4">Train Data Testing</h2>
+            <div class="mb-4 flex space-x-2">
+                <input x-model="testTrainNumber" 
+                       type="text" 
+                       placeholder="Train number (e.g., IR 1744)"
+                       class="flex-1 border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <button @click="testTrain()" 
+                        :disabled="testingTrain || !testTrainNumber"
+                        class="bg-green-500 hover:bg-green-600 disabled:bg-gray-400 text-white px-4 py-2 rounded-lg transition-colors">
+                    <span x-show="!testingTrain">
+                        <i class="fas fa-search mr-2"></i>Test Train
+                    </span>
+                    <span x-show="testingTrain">
+                        <i class="fas fa-spinner fa-spin mr-2"></i>Testing...
+                    </span>
+                </button>
+            </div>
+            
+            <div x-show="trainResults" class="mt-4">
+                <div class="bg-gray-50 p-4 rounded-lg">
+                    <h3 class="font-medium mb-2">Results:</h3>
+                    <div class="text-sm space-y-2">
+                        <div class="flex justify-between">
+                            <span>Data Source:</span>
+                            <span x-text="trainResults?.source" class="font-mono"></span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span>Train Found:</span>
+                            <span x-text="trainResults?.found ? 'Yes' : 'No'" class="font-mono"></span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span>Real CFR Attempted:</span>
+                            <span x-text="trainResults?.cfr_attempted ? 'Yes' : 'No'" class="font-mono"></span>
+                        </div>
+                        <div x-show="trainResults?.stations" class="flex justify-between">
+                            <span>Stations:</span>
+                            <span x-text="trainResults?.stations?.length || 0" class="font-mono"></span>
+                        </div>
+                    </div>
+                    
+                    <details class="mt-4">
+                        <summary class="cursor-pointer text-blue-600 hover:text-blue-800">Show Raw Data</summary>
+                        <pre class="mt-2 text-xs bg-gray-100 p-2 rounded overflow-x-auto" x-text="JSON.stringify(trainResults, null, 2)"></pre>
+                    </details>
+                </div>
+            </div>
+        </div>
+
+        <!-- Data Sources Overview -->
+        <div class="bg-white rounded-lg shadow-md p-6">
+            <h2 class="text-xl font-semibold mb-4">Data Sources Overview</h2>
+            <div class="space-y-4">
+                <div class="border-l-4 border-green-500 pl-4">
+                    <h3 class="font-medium text-green-700">Real CFR Data</h3>
+                    <p class="text-sm text-gray-600">Scraped directly from https://bilete.cfrcalatori.ro</p>
+                    <p class="text-xs text-gray-500">Provides live train schedules and real station data</p>
+                </div>
+                
+                <div class="border-l-4 border-yellow-500 pl-4">
+                    <h3 class="font-medium text-yellow-700">Enhanced Demo Data</h3>
+                    <p class="text-sm text-gray-600">Comprehensive 143-station Romanian railway network</p>
+                    <p class="text-xs text-gray-500">Realistic train compositions with locomotive and car details</p>
+                </div>
+                
+                <div class="border-l-4 border-blue-500 pl-4">
+                    <h3 class="font-medium text-blue-700">Fallback Strategy</h3>
+                    <p class="text-sm text-gray-600">Graceful degradation when CFR is unavailable</p>
+                    <p class="text-xs text-gray-500">Transparent status indicators show data source</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function cfrTestApp() {
+            return {
+                cfrStatus: {},
+                stationResults: null,
+                trainResults: null,
+                testingStations: false,
+                testingTrain: false,
+                testTrainNumber: 'IR 1744',
+
+                async init() {
+                    await this.loadCfrStatus();
+                },
+
+                async loadCfrStatus() {
+                    try {
+                        const response = await fetch('/api/cfr-status');
+                        this.cfrStatus = await response.json();
+                    } catch (error) {
+                        console.error('Failed to load CFR status:', error);
+                    }
+                },
+
+                async testStations() {
+                    this.testingStations = true;
+                    this.stationResults = null;
+                    
+                    try {
+                        const response = await fetch('/api/stations');
+                        const data = await response.json();
+                        
+                        this.stationResults = {
+                            source: data.source || 'unknown',
+                            count: data.length || 0,
+                            cfr_attempted: data.cfr_attempted || false,
+                            data: data
+                        };
+                    } catch (error) {
+                        console.error('Failed to test stations:', error);
+                        this.stationResults = {
+                            error: error.message,
+                            source: 'error'
+                        };
+                    } finally {
+                        this.testingStations = false;
+                    }
+                },
+
+                async testTrain() {
+                    if (!this.testTrainNumber) return;
+                    
+                    this.testingTrain = true;
+                    this.trainResults = null;
+                    
+                    try {
+                        const response = await fetch(`/api/test-real-data/${encodeURIComponent(this.testTrainNumber)}`);
+                        const data = await response.json();
+                        
+                        this.trainResults = {
+                            source: data.source || 'unknown',
+                            found: !!data.train || !!data.stations,
+                            cfr_attempted: data.cfr_attempted || false,
+                            stations: data.stations,
+                            train: data.train,
+                            data: data
+                        };
+                    } catch (error) {
+                        console.error('Failed to test train:', error);
+                        this.trainResults = {
+                            error: error.message,
+                            source: 'error'
+                        };
+                    } finally {
+                        this.testingTrain = false;
+                    }
+                }
+            }
+        }
+    </script>
+</body>
+</html>
