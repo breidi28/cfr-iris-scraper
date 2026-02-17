@@ -5,7 +5,7 @@ from government_integration import (
     search_government_trains, get_data_validity_info, is_date_valid,
     get_government_station_timetable
 )
-from flask import Flask, jsonify, send_from_directory, render_template, request
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 from datetime import datetime, timedelta
 from dateutil import tz, parser
@@ -262,87 +262,6 @@ except Exception as e:
     for station in stations:
         config.global_station_list[station["name"]] = station["station_id"]
     logger.info(f"Loaded {len(stations)} demo stations")
-
-@app.route('/static/<path:path>')
-def send_res(path):
-    return send_from_directory('static', path)
-
-@app.route('/manifest.json')
-def manifest():
-    return send_from_directory('static', 'manifest.json')
-
-@app.route('/')
-def hello_world():
-    return render_template('live.html')
-
-@app.route('/test-cfr')
-def test_cfr():
-    """CFR testing and debugging page"""
-    return render_template('test_cfr.html')
-
-
-@app.route('/api/test-real-data/<string:train_id>')
-def test_real_data(train_id):
-    """Test endpoint to manually check real CFR data fetching"""
-    try:
-        # Test real train data
-        from src.TrainPageGetter import get_real_train_data
-        train_data = get_real_train_data(train_id)
-        return jsonify({
-            "status": "success",
-            "train_id": train_id,
-            "data": train_data,
-            "source": "real_cfr_data"
-        })
-    except Exception as e:
-        return jsonify({
-            "status": "error", 
-            "train_id": train_id,
-            "error": str(e),
-            "source": "cfr_scraping_failed"
-        }), 500
-
-
-@app.route('/api/test-real-stations')
-def test_real_stations():
-    """Test endpoint to manually check real CFR station fetching"""
-    try:
-        from src.StationsGetter import get_real_stations
-        stations = get_real_stations()
-        return jsonify({
-            "status": "success",
-            "stations": stations[:10],  # Just first 10 for testing
-            "total_count": len(stations),
-            "source": "real_cfr_data"
-        })
-    except Exception as e:
-        return jsonify({
-            "status": "error",
-            "error": str(e),
-            "source": "cfr_scraping_failed"
-        }), 500
-
-
-@app.route('/api/test-real-timetable/<string:station_id>')
-def test_real_timetable(station_id):
-    """Test endpoint to manually check real CFR timetable fetching"""
-    try:
-        from src.StationTimetableGetter import get_real_timetable
-        timetable = get_real_timetable(station_id)
-        return jsonify({
-            "status": "success",
-            "station_id": station_id,
-            "timetable": timetable,
-            "count": len(timetable),
-            "source": "real_cfr_data"
-        })
-    except Exception as e:
-        return jsonify({
-            "status": "error",
-            "station_id": station_id,
-            "error": str(e),
-            "source": "cfr_scraping_failed"
-        }), 500
 
 
 @app.route('/api')
