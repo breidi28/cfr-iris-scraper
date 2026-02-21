@@ -1741,5 +1741,40 @@ def get_time_ago(timestamp_str):
     except:
         return "Unknown"
 
+@app.route('/api/train/<string:train_id>/reports', methods=['GET'])
+def get_train_reports(train_id):
+    try:
+        conn = sqlite3.connect('passenger_data.db')
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT * FROM passenger_reports 
+            WHERE train_number COLLATE NOCASE = ? 
+            ORDER BY reported_at DESC LIMIT 50
+        ''', (train_id,))
+        reports = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+        return jsonify(reports)
+    except Exception as e:
+        logger.error(f"Error fetching reports: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/train/<string:train_id>/reports', methods=['POST'])
+def add_train_report(train_id):
+    try:
+        data = request.json
+        conn = sqlite3.connect('passenger_data.db')
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO passenger_reports (train_number, report_type, message, user_ip)
+            VALUES (?, ?, ?, ?)
+        ''', (train_id, data.get('report_type'), data.get('message'), request.remote_addr))
+        conn.commit()
+        conn.close()
+        return jsonify({"success": True})
+    except Exception as e:
+        logger.error(f"Error adding report: {e}")
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
