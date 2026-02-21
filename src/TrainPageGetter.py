@@ -1,10 +1,8 @@
-from viewstate import ViewState
 from src import config
-import requests_html
+import requests
 from datetime import datetime, timedelta
 import re
 from bs4 import BeautifulSoup
-import requests
 
 # Updated to use the working mersultrenurilor site
 base_url = "https://mersultrenurilor.infofer.ro/ro-RO/Tren/{}"
