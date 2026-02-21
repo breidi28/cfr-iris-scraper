@@ -630,11 +630,43 @@ def get_timetable(station_id):
         from government_integration import get_government_station_name
         station_name = get_government_station_name(station_id)
         
-        # NOTE: We no longer scrape all trains here to speed up the response
-        # The scraping logic is now in the /api/train/<id> endpoint which is called
-        # when the user taps on a specific train.
+        # OPTIMIZATION: Concurrently fetch live delays for immediate active trains
+        try:
+            from concurrent.futures import ThreadPoolExecutor
+            
+            timezone_obj = tz.gettz('Europe/Bucharest')
+            now = datetime.now(tz=timezone_obj)
+            window_start = now - timedelta(hours=1, minutes=30)
+            window_end = now + timedelta(hours=3)
+            
+            active_trains = []
+            for item in timetable:
+                train_time = None
+                if item.get('departure_timestamp'):
+                    train_time = parser.isoparse(item['departure_timestamp'])
+                elif item.get('arrival_timestamp'):
+                    train_time = parser.isoparse(item['arrival_timestamp'])
+                    
+                if train_time and window_start <= train_time <= window_end:
+                    active_trains.append(item)
+                    
+            def attach_live_delay(train):
+                try:
+                    real_data = get_real_train_data(train.get('train_id', ''))
+                    if real_data and 'delay' in real_data:
+                        train['delay'] = real_data['delay']
+                        train['data_source'] = 'iris_live'
+                except Exception:
+                    pass
+                    
+            if active_trains:
+                logger.info(f"Concurrently fetching live delays for {len(active_trains)} active trains (FAST MODE)")
+                with ThreadPoolExecutor(max_workers=15) as executor:
+                    executor.map(attach_live_delay, active_trains)
+        except Exception as e:
+            logger.error(f"Failed to attach live delays: {e}")
         
-        logger.info(f"Serving {len(timetable)} trains from government data (FAST MODE - no bulk live scraping)")
+        logger.info(f"Serving {len(timetable)} trains from government data (with live delays for active window)")
         
         return jsonify(timetable)
             
