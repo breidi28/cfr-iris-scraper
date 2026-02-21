@@ -78,6 +78,8 @@ def get_real_train_data(train_id):
 
         def parse_stations_from_div(branch_div):
             stops = []
+            last_known_delay = 0
+            
             for item in branch_div.find_all('li', class_='list-group-item'):
                 station_link = item.find('a', href=lambda x: x and '/ro-RO/Statie/' in x)
                 if not station_link:
@@ -86,18 +88,40 @@ def get_real_train_data(train_id):
                 time_divs = item.find_all('div', class_='text-1-3rem')
                 arrival_time = time_divs[0].get_text(strip=True) if len(time_divs) > 0 else None
                 departure_time = time_divs[1].get_text(strip=True) if len(time_divs) > 1 else arrival_time
+                
                 delay_divs = item.find_all('div', class_=['color-firebrick', 'color-darkgreen'])
-                delay_minutes = 0
+                parsed_delay = None
+                
                 if delay_divs:
                     for delay_div in delay_divs:
                         delay_text = delay_div.get_text(strip=True)
                         if 'la timp' in delay_text.lower():
-                            delay_minutes = 0
+                            parsed_delay = 0
                             break
                         delay_match = re.search(r'([+\-]\d+)\s*min', delay_text)
                         if delay_match:
-                            delay_minutes = int(delay_match.group(1))
+                            parsed_delay = int(delay_match.group(1))
                             break
+                            
+                # Intelligent delay propagation:
+                # If CFR explicitly says there's a delay, we trust it and update our tracker.
+                # If CFR says 'la timp' (0) OR provides no delay info, but we have a massive last_known_delay,
+                # we propagate the delay forward (a train can't instantly make up 70 minutes).
+                # We generously allow trains to make up to 15 mins of delay between stations, but no more.
+                if parsed_delay is not None:
+                    if parsed_delay > 0:
+                        last_known_delay = parsed_delay
+                    else:
+                        # CFR says 0. If we were late by more than 15 mins, this is likely a lie/unupdated future station.
+                        if last_known_delay > 15:
+                            parsed_delay = last_known_delay
+                        else:
+                            last_known_delay = 0
+                else:
+                    # No delay info given, assume it inherits the current rolling delay
+                    parsed_delay = last_known_delay
+
+                delay_minutes = parsed_delay if parsed_delay is not None else 0
 
                 # Extract platform ("Linia X" or "Perón X" label in small text)
                 platform = None
