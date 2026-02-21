@@ -100,11 +100,36 @@ def get_real_train_data(train_id):
                         if delay_match:
                             delay_minutes = int(delay_match.group(1))
                             break
+
+                # Extract platform ("Linia X" or "Perón X" label in small text)
+                platform = None
+                for small in item.find_all(['small', 'div', 'span']):
+                    txt = small.get_text(strip=True)
+                    linia_match = re.search(r'(?:Linia|linia|Linie|Per[oó]n|perón)\s*(\d)', txt)
+                    if linia_match:
+                        platform = linia_match.group(1)
+                        break
+
+                # Compute dwell time from arrival/departure difference
+                dwell_minutes = 0
+                if arrival_time and departure_time and arrival_time != departure_time:
+                    try:
+                        def t2m(t):
+                            h, m = t.strip().split(':')
+                            return int(h) * 60 + int(m)
+                        dwell_minutes = t2m(departure_time) - t2m(arrival_time)
+                        if dwell_minutes < 0:
+                            dwell_minutes += 24 * 60  # midnight crossing
+                    except Exception:
+                        dwell_minutes = 0
+
                 stops.append({
                     'station_name': station_name,
                     'arrival_time': arrival_time,
                     'departure_time': departure_time,
-                    'delay': delay_minutes
+                    'delay': delay_minutes,
+                    'platform': platform,
+                    'dwell_minutes': dwell_minutes,
                 })
             return stops
 
@@ -145,8 +170,24 @@ def get_real_train_data(train_id):
                 time_divs = item.find_all('div', class_='text-1-3rem')
                 arrival_time = time_divs[0].get_text(strip=True) if len(time_divs) > 0 else None
                 departure_time = time_divs[1].get_text(strip=True) if len(time_divs) > 1 else arrival_time
+                platform = None
+                for small in item.find_all(['small', 'div', 'span']):
+                    txt = small.get_text(strip=True)
+                    linia_match = re.search(r'(?:Linia|linia|Linie|Per[oó]n)\s*(\d+[a-zA-Z]?)', txt)
+                    if linia_match:
+                        platform = linia_match.group(1)
+                        break
+                dwell_minutes = 0
+                if arrival_time and departure_time and arrival_time != departure_time:
+                    try:
+                        def t2m(t): h, m = t.strip().split(':'); return int(h)*60+int(m)
+                        dwell_minutes = t2m(departure_time) - t2m(arrival_time)
+                        if dwell_minutes < 0: dwell_minutes += 24*60
+                    except Exception:
+                        dwell_minutes = 0
                 stops.append({'station_name': station_name, 'arrival_time': arrival_time,
-                              'departure_time': departure_time, 'delay': 0})
+                              'departure_time': departure_time, 'delay': 0,
+                              'platform': platform, 'dwell_minutes': dwell_minutes})
             if stops:
                 branches.append({'label': 'Rută', 'stations_data': stops})
 
