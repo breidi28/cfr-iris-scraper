@@ -6,7 +6,7 @@ This is the backend service for the Train Tracker application, providing data ab
 
 The API uses a **hybrid data approach** to provide the best possible information:
 
-1.  **Government Open Data (Base)**: 
+1.  **Infofer Real-Time Data (Base)**:
     - Uses the official XML dataset from `data.gov.ro` (e.g., `trenuri-2025-2026_sntfc.xml`) for the static timetable, routes, and station lists.
     - This provides fast, reliable, and offline-capable schedule data.
 

@@ -15,7 +15,7 @@ def main():
     # Start Flask app
     python_exe = r"C:\Program Files\Python312\python.exe"
     try:
-        print("🚀 Starting Flask backend with government data integration...")
+        print("🚀 Starting Flask backend (Infofer real-time only)...")
         result = subprocess.run([python_exe, "app.py"], check=True)
     except subprocess.CalledProcessError as e:
         print(f"❌ Error starting Flask app: {e}")

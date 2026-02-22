@@ -1,10 +1,5 @@
 from src import StationsGetter, StationTimetableGetter, config
 from src.TrainPageGetter import get_real_train_data
-from government_integration import (
-    init_government_data, get_government_stations, get_government_train_data, 
-    search_government_trains, get_data_validity_info, is_date_valid,
-    get_government_station_timetable
-)
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from datetime import datetime, timedelta
@@ -21,13 +16,6 @@ CORS(app)
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# Initialize government data
-logger.info("Initializing government railway data...")
-if init_government_data():
-    logger.info("✅ Government data initialized successfully")
-else:
-    logger.error("❌ Failed to initialize government data - app may not work correctly")
 
 # Initialize passenger reports database
 def init_passenger_db():
@@ -346,85 +334,45 @@ def data_sources_info():
 @app.route('/api/train/<string:train_id>')
 @app.route('/train/<string:train_id>')
 def get_train_enhanced(train_id):
-    """Enhanced train endpoint: tries IRIS for real-time data, falls back to government data"""
+    """Enhanced train endpoint: uses only IRIS (Infofer) real-time data"""
     try:
         # Get optional parameters
         search_date = request.args.get('date')
         filter_stops = request.args.get('filter_stops', 'false').lower() == 'true'
         
-        # Try to get real-time data from IRIS first
-        logger.info(f"Attempting to fetch real-time data from IRIS for train {train_id}")
-        try:
-            iris_data = get_real_train_data(train_id)
-            if iris_data and 'stations_data' in iris_data:
-                logger.info(f"✅ Got real-time IRIS data for train {train_id}")
-                
-                stations_list = iris_data['stations_data']
-                branches = iris_data.get('branches', [{'label': 'Rută', 'stations_data': stations_list}])
-                
-                return jsonify({
-                    "train_number": train_id,
-                    "stations": stations_list,
-                    "stops": stations_list,  # Include both for compatibility
-                    "branches": branches,
-                    "operator": iris_data.get('operator', 'CFR Călători'),
-                    "category": iris_data.get('category', ''),
-                    "alerts": iris_data.get('alerts', []),
-                    "data_source": {
-                        "type": "iris_real_time",
-                        "source": "mersultrenurilor.infofer.ro (Real-time)",
-                        "timestamp": datetime.now().isoformat(),
-                        "has_live_delays": True
-                    }
-                })
-        except Exception as iris_error:
-            logger.warning(f"IRIS fetch failed for train {train_id}: {iris_error}. Falling back to government data.")
-        
-        # Fall back to government data (scheduled timetable)
-        logger.info(f"Fetching scheduled data from government source for train {train_id}")
-        train_data = get_government_train_data(train_id, search_date, filter_stops)
-        
-        if train_data:
-            # Check if it's an error response (date out of range)
-            if isinstance(train_data, dict) and 'error' in train_data:
-                return jsonify(train_data), 400
-                
-            return jsonify(train_data)
-        else:
-            # Train not found in either source
-            suggestions = search_government_trains(train_id[:2] if len(train_id) > 2 else train_id, search_date)
-            suggestion_list = [f"{s['train_number']}" for s in suggestions[:5]]
-            
+        logger.info(f"Fetching real-time data from Infofer for train {train_id}")
+        iris_data = get_real_train_data(train_id)
+        if iris_data and 'stations_data' in iris_data:
+            logger.info(f"✅ Got real-time Infofer data for train {train_id}")
+            stations_list = iris_data['stations_data']
+            branches = iris_data.get('branches', [{'label': 'Rută', 'stations_data': stations_list}])
             return jsonify({
-                "error": f"Train {train_id} not found in official CFR data",
-                "suggestions": suggestion_list if suggestion_list else [
-                    "IC 536 (Constanța → Brașov)",
-                    "IR 1655 (Bucharest → Suceava)", 
-                    "IR 1094 (Available IR train)",
-                    "R 2872 (Târgu Jiu → Turceni)"
-                ],
-                "help": {
-                    "available_categories": "IC (InterCity), IR (InterRegio), R (Regional), R-E (Regional Express)",
-                    "note": "This uses real government data - only trains that actually exist are shown",
-                    "data_source": "Official CFR data from data.gov.ro"
-                },
+                "train_number": train_id,
+                "stations": stations_list,
+                "stops": stations_list,  # Include both for compatibility
+                "branches": branches,
+                "operator": iris_data.get('operator', 'CFR Călători'),
+                "category": iris_data.get('category', ''),
+                "alerts": iris_data.get('alerts', []),
                 "data_source": {
-                    "type": "government_official_data",
-                    "source": "data.gov.ro CFR Călători",
+                    "type": "infofer_real_time",
+                    "source": "mersultrenurilor.infofer.ro",
                     "timestamp": datetime.now().isoformat(),
-                    "search_attempted": True
+                    "has_live_delays": True
                 }
+            })
+        else:
+            return jsonify({
+                "error": f"Train {train_id} not found",
+                "message": "Train not found on official Infofer live boards",
+                "data_source": "infofer_live"
             }), 404
             
     except Exception as e:
-        logger.error(f"Error fetching government train data for {train_id}: {e}")
+        logger.error(f"Error fetching train data for {train_id}: {e}")
         return jsonify({
             "error": f"Unable to process request for train {train_id}",
-            "details": str(e),
-            "data_source": {
-                "type": "error",
-                "timestamp": datetime.now().isoformat()
-            }
+            "details": str(e)
         }), 500
 
 
@@ -443,52 +391,25 @@ def get_data_validity():
 
 @app.route('/api/search/trains')
 def search_trains_with_date():
-    """Search trains with optional date parameter"""
+    """Simple search that allows direct train number lookup without government data"""
     try:
-        query = request.args.get('q', '')
-        search_date = request.args.get('date')
-        
+        query = request.args.get('q', '').upper().strip()
         if not query:
-            return jsonify({"error": "Query parameter 'q' is required"}), 400
-        
-        # Validate date if provided
-        if search_date and not is_date_valid(search_date):
-            validity_info = get_data_validity_info()
-            return jsonify({
-                "error": "Date out of range",
-                "message": f"Date {search_date} is outside data validity period",
-                "valid_from": validity_info["valid_from"],
-                "valid_until": validity_info["valid_until"]
-            }), 400
-        
-        results = search_government_trains(query, search_date)
-        if not results:
-            results = []
+            return jsonify({"results": []})
             
-        import re
-        numeric_match = re.search(r'\d{2,}', query)
-        if numeric_match:
-            exact_number = numeric_match.group(0)
-            already_exists = any(exact_number == ''.join(filter(str.isdigit, str(r.get('train_number', '')))) for r in results)
-            if not already_exists:
-                custom_query = query.upper().strip()
-                results.append({
-                    "train_number": custom_query,
-                    "route": f"Caută orice tren {custom_query} (privat/CFR)",
-                    "operator": "Sistem național integrat",
-                    "id": custom_query
-                })
+        # Since we don't have a static database anymore, we treat the query as a train number
+        results = [{
+            "train_number": query,
+            "route": f"Vizualizează traseu live tren {query}",
+            "operator": "Operator feroviar",
+            "id": query
+        }]
         
         return jsonify({
             "query": query,
-            "search_date": search_date if search_date else "current_schedule",
             "results": results,
             "count": len(results),
-            "data_source": {
-                "type": "government_official_data",
-                "source": "data.gov.ro CFR Călători",
-                "timestamp": datetime.now().isoformat()
-            }
+            "data_source": "manual_lookup"
         })
         
     except Exception as e:
@@ -564,38 +485,20 @@ def get_stations():
 
 @app.route('/api/stations')
 def api_get_stations():
-    """API endpoint for stations list - used by the live frontend"""
+    """API endpoint for stations list - uses scraped data only"""
     try:
-        # Get stations from government data
-        gov_stations = get_government_stations()
-        
-        # If not initialized, try one more time
-        if not gov_stations:
-            logger.warning("Stations list empty or not initialized. Attempting re-initialization...")
-            if init_government_data():
-                gov_stations = get_government_stations()
-            else:
-                logger.error("Re-initialization failed")
-        
-        if gov_stations:
-            # Convert to frontend format
-            stations = []
-            for station in gov_stations:
-                stations.append({
-                    "name": station['name'],
-                    "station_id": station['id'],
-                    "region": station.get('region', 'Unknown'),
-                    "importance": station.get('importance', 6)
-                })
+        if stations:
+            # Format nicely for frontend if needed, though they already have name/station_id
             return jsonify(stations)
         else:
-            raise Exception("No government stations available")
+            # Try to fetch if empty
+            current_stations = StationsGetter.get_stations()
+            return jsonify(current_stations)
     except Exception as e:
-        logger.error(f"Error getting government stations: {e}")
-        # Try returning demo data or empty list instead of 503 to keep app alive
+        logger.error(f"Error getting stations: {e}")
         return jsonify({
-            "error": "Station data temporarily unavailable",
-            "message": "Unable to load station data from official sources"
+            "error": "Station data unavailable",
+            "message": str(e)
         }), 503
 
 
@@ -631,73 +534,39 @@ def reload_stations():
 
 
 @app.route('/station/<int:station_id>')
+@app.route('/station/<string:station_id>')
 def get_timetable(station_id):
-    """Get station timetable with live delays when possible"""
+    """Get station timetable ONLY from live Infofer scraper"""
     try:
-        # Get base timetable from government data
-        logger.info(f"Fetching timetable for station {station_id} from government data")
-        timetable = get_government_station_timetable(station_id)
+        # 1. Resolve Name: Map numeric or slug ID to the real station name
+        station_name = next((s["name"] for s in stations if str(s.get("station_id")) == str(station_id)), None)
+        
+        if not station_name:
+            # If not in our list, try using the ID as a slug directly
+            station_name = str(station_id).replace('-', ' ').title()
+            logger.info(f"Station ID {station_id} not in global list, trying as name: {station_name}")
+
+        # 2. Fetch from Scraper
+        logger.info(f"Fetching timetable for {station_name} from Infofer live")
+        timetable = StationTimetableGetter.get_timetable(station_id, station_name)
         
         if not timetable:
             return jsonify({
-                "error": "No train data available",
-                "message": f"No trains found for station {station_id}",
+                "error": "No train data found",
+                "message": f"No active trains found for {station_name} on Infofer live boards",
                 "station_id": station_id
             }), 404
-        
-        # Get station name to match with live data
-        from government_integration import get_government_station_name
-        station_name = get_government_station_name(station_id)
-        
-        # OPTIMIZATION: Concurrently fetch live delays for immediate active trains
-        try:
-            from concurrent.futures import ThreadPoolExecutor
+
+        for item in timetable:
+            item['is_live'] = True
             
-            timezone_obj = tz.gettz('Europe/Bucharest')
-            now = datetime.now(tz=timezone_obj)
-            window_start = now - timedelta(hours=1, minutes=30)
-            window_end = now + timedelta(hours=3)
-            
-            active_trains = []
-            for item in timetable:
-                train_time = None
-                if item.get('departure_timestamp'):
-                    train_time = parser.isoparse(item['departure_timestamp'])
-                elif item.get('arrival_timestamp'):
-                    train_time = parser.isoparse(item['arrival_timestamp'])
-                    
-                if train_time and window_start <= train_time <= window_end:
-                    active_trains.append(item)
-                    
-            def attach_live_delay(train):
-                try:
-                    real_data = get_real_train_data(train.get('train_id', ''))
-                    if real_data:
-                        if 'delay' in real_data:
-                            train['delay'] = real_data['delay']
-                            train['data_source'] = 'iris_live'
-                        if 'operator' in real_data and real_data['operator'] != "CFR Călători":
-                            train['operator'] = real_data['operator']
-                except Exception:
-                    pass
-                    
-            if active_trains:
-                logger.info(f"Concurrently fetching live delays for {len(active_trains)} active trains (FAST MODE)")
-                with ThreadPoolExecutor(max_workers=15) as executor:
-                    executor.map(attach_live_delay, active_trains)
-        except Exception as e:
-            logger.error(f"Failed to attach live delays: {e}")
-        
-        logger.info(f"Serving {len(timetable)} trains from government data (with live delays for active window)")
-        
         return jsonify(timetable)
             
     except Exception as e:
         logger.error(f"Failed to get timetable for station {station_id}: {e}")
         return jsonify({
             "error": "Timetable data unavailable",
-            "message": f"Could not fetch timetable for station {station_id}",
-            "details": str(e)
+            "message": str(e)
         }), 500
 
 
@@ -1409,49 +1278,20 @@ def get_train_composition_api(train_id):
 # Train suggestion endpoint for live search
 @app.route('/api/train-suggestions/<string:query>')
 def get_train_suggestions(query):
-    """Get train suggestions based on user input using government data"""
+    """Simple train suggestions that allows direct train number lookup"""
     if len(query) < 2:
         return jsonify([])
     
     try:
-        # Use government data for real train suggestions
-        results = search_government_trains(query)
+        query_upper = query.upper().strip()
+        suggestions = [{
+            "train_number": query_upper,
+            "type": "Tren",
+            "description": f"Caută trenul {query_upper} pe Infofer",
+            "score": 100
+        }]
         
-        suggestions = []
-        for result in results:
-            suggestions.append({
-                "train_number": result['train_number'],
-                "type": result['category'],
-                "description": f"{result['category']} train",
-                "score": 100 if result['relevance'] == 'exact' else 80 if result['relevance'] == 'partial' else 60
-            })
-        
-        # If no results, provide helpful suggestions based on common patterns
-        if not suggestions:
-            query_upper = query.upper()
-            if any(cat in query_upper for cat in ['IC', 'IR', 'R']):
-                suggestions.append({
-                    "train_number": query_upper,
-                    "type": "Search suggestion",
-                    "description": f"Search for trains matching '{query}'",
-                    "score": 50
-                })
-        
-        return jsonify(suggestions[:8])  # Limit to 8 suggestions
-        
-    except Exception as e:
-        logger.error(f"Failed to generate train suggestions for '{query}': {e}")
-        return jsonify([])
-        
-        # Sort by score and remove duplicates
-        seen = set()
-        unique_suggestions = []
-        for suggestion in sorted(suggestions, key=lambda x: x["score"], reverse=True):
-            if suggestion["train_number"] not in seen:
-                seen.add(suggestion["train_number"])
-                unique_suggestions.append(suggestion)
-        
-        return jsonify(unique_suggestions[:8])  # Limit to 8 suggestions
+        return jsonify(suggestions)
         
     except Exception as e:
         logger.error(f"Failed to generate train suggestions for '{query}': {e}")
@@ -1493,41 +1333,25 @@ def search_stations(query):
         return jsonify([])
 
 
-# Enhanced train search
+# Enhanced train search (Redirected to manual lookup)
 @app.route('/api/trains/search/<string:query>')
 def search_trains(query):
-    """Search trains by number or name with optional date parameter"""
+    """Search trains by number with live Infofer data as the target"""
     if len(query) < 2:
         return jsonify([])
     
     try:
-        # Get optional date parameter
-        search_date = request.args.get('date')
-        
-        # Use government data search
-        results = search_government_trains(query, search_date)
-        if not results:
-            results = []
-            
-        import re
-        numeric_match = re.search(r'\d{2,}', query)
-        if numeric_match:
-            exact_number = numeric_match.group(0)
-            already_exists = any(exact_number == ''.join(filter(str.isdigit, str(r.get('train_number', '')))) for r in results)
-            if not already_exists:
-                custom_query = query.upper().strip()
-                results.append({
-                    "train_number": custom_query,
-                    "route": f"Caută orice tren {custom_query} (privat/CFR)",
-                    "operator": "Sistem național integrat",
-                    "id": custom_query
-                })
-        
+        query_clean = query.upper().strip()
+        # Return a list of suggestions based on the query as a number
+        results = [{
+            "train_number": query_clean,
+            "route": f"Verifică traseul live pentru trenul {query_clean}",
+            "operator": "Interogare Infofer",
+            "id": query_clean
+        }]
         return jsonify(results)
-            
     except Exception as e:
         logger.error(f"Error in train search for query '{query}': {e}")
-        # Return empty array on error to prevent frontend issues
         return jsonify([])
 
 
