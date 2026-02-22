@@ -1366,6 +1366,19 @@ def get_train_composition(train_id):
     
     return composition
 
+@app.route('/api/train/<string:train_id>/composition')
+def get_train_composition_api(train_id):
+    """API endpoint to get train composition and facilities"""
+    try:
+        composition = get_train_composition(train_id)
+        return jsonify(composition)
+    except Exception as e:
+        logger.error(f"Failed to get composition for train {train_id}: {e}")
+        return jsonify({
+            "error": "Failed to get train composition",
+            "details": str(e)
+        }), 500
+
 
 # Train suggestion endpoint for live search
 @app.route('/api/train-suggestions/<string:query>')
