@@ -1480,12 +1480,24 @@ def search_trains(query):
         
         # Use government data search
         results = search_government_trains(query, search_date)
+        if not results:
+            results = []
+            
+        import re
+        numeric_match = re.search(r'\d{2,}', query)
+        if numeric_match:
+            exact_number = numeric_match.group(0)
+            already_exists = any(exact_number == ''.join(filter(str.isdigit, str(r.get('train_number', '')))) for r in results)
+            if not already_exists:
+                custom_query = query.upper().strip()
+                results.append({
+                    "train_number": custom_query,
+                    "route": f"Caută orice tren {custom_query} (privat/CFR)",
+                    "operator": "Sistem național integrat",
+                    "id": custom_query
+                })
         
-        if results:
-            return jsonify(results)
-        else:
-            # If no results from government data, return empty array
-            return jsonify([])
+        return jsonify(results)
             
     except Exception as e:
         logger.error(f"Error in train search for query '{query}': {e}")
