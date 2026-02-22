@@ -672,9 +672,12 @@ def get_timetable(station_id):
             def attach_live_delay(train):
                 try:
                     real_data = get_real_train_data(train.get('train_id', ''))
-                    if real_data and 'delay' in real_data:
-                        train['delay'] = real_data['delay']
-                        train['data_source'] = 'iris_live'
+                    if real_data:
+                        if 'delay' in real_data:
+                            train['delay'] = real_data['delay']
+                            train['data_source'] = 'iris_live'
+                        if 'operator' in real_data and real_data['operator'] != "CFR Călători":
+                            train['operator'] = real_data['operator']
                 except Exception:
                     pass
                     

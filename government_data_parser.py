@@ -97,7 +97,7 @@ class GovernmentDataParser:
                 train_data = {
                     'train_number': train_number,
                     'category': category if category else 'Unknown',
-                    'operator': 'CFR Călători',
+                    'operator': self._guess_operator(train_number),
                     'route_elements': route_elements
                 }
                 
@@ -105,6 +105,37 @@ class GovernmentDataParser:
         
         print(f"Extracted {len(trains_list)} trains")
         return trains_list
+
+    def _guess_operator(self, train_number):
+        """Guess the private operator based on the train number ranges in Romania."""
+        try:
+            num_str = "".join(filter(str.isdigit, str(train_number)))
+            if not num_str:
+                return "CFR Călători"
+                
+            # Softrans: 116xx
+            if num_str.startswith('116') and len(num_str) == 5:
+                return "Softrans"
+                
+            # Astra Trans Carpatic: 115xx, 155xx, 15531
+            if (num_str.startswith('115') or num_str.startswith('155')) and len(num_str) == 5:
+                return "Astra Trans Carpatic"
+                
+            # Transferoviar (TFC): 10xxx
+            if num_str.startswith('10') and len(num_str) == 5:
+                return "Transferoviar Călători (TFC)"
+                
+            # InterRegional: 105xx, 106xx
+            if num_str.startswith('105') or num_str.startswith('106'):
+                return "Interregional Călători"
+                
+            # Regio Calatori: 11xxx (but not 115xx/116xx above)
+            if num_str.startswith('11') and len(num_str) == 5:
+                return "Regio Călători"
+                
+            return "CFR Călători"
+        except Exception:
+            return "CFR Călători"
     
     def get_train_route(self, train_number):
         """Get specific train route by train number"""
