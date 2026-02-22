@@ -239,7 +239,9 @@ def get_real_train_data(train_id):
             for alert_box in s.find_all('div', class_=lambda c: c and 'alert' in c.lower()):
                 text = alert_box.get_text(separator=' ', strip=True)
                 if text and len(text) > 10 and 'Fără internet' not in text:
-                    alerts_set.add(text)
+                    # Clean up multiple spaces and newlines
+                    cleaned_text = re.sub(r'\s+', ' ', text).strip()
+                    alerts_set.add(cleaned_text)
         
         alerts = list(alerts_set)
 
