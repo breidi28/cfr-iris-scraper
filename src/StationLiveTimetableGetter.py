@@ -199,22 +199,8 @@ def parse_iris_train_row(cells, station_code):
         # Format train_id consistently with government data
         train_id = f"{category}{train_number}" if category else train_number
         
-        # Guess operator based on train number
+        # Default to CFR Călători as there is no official operator label in IRIS
         operator = "CFR Călători"
-        try:
-            num_str = "".join(filter(str.isdigit, str(train_number)))
-            if num_str.startswith('116') and len(num_str) == 5:
-                operator = "Softrans"
-            elif (num_str.startswith('115') or num_str.startswith('155')) and len(num_str) == 5:
-                operator = "Astra Trans Carpatic"
-            elif num_str.startswith('10') and len(num_str) == 5:
-                operator = "Transferoviar Călători (TFC)"
-            elif num_str.startswith('105') or num_str.startswith('106'):
-                operator = "Interregional Călători"
-            elif num_str.startswith('11') and len(num_str) == 5:
-                operator = "Regio Călători"
-        except:
-            pass
             
         return {
             'rank': category,  # Category for badge display
@@ -293,22 +279,8 @@ def parse_iris_train_div(container, station_code):
         # Format train_id consistently
         train_id = f"{category}{train_number}" if category else train_number
         
-        # Guess operator based on train number
+        # Default to CFR Călători as there is no official operator label in IRIS
         operator = "CFR Călători"
-        try:
-            num_str = "".join(filter(str.isdigit, str(train_number)))
-            if num_str.startswith('116') and len(num_str) == 5:
-                operator = "Softrans"
-            elif (num_str.startswith('115') or num_str.startswith('155')) and len(num_str) == 5:
-                operator = "Astra Trans Carpatic"
-            elif num_str.startswith('10') and len(num_str) == 5:
-                operator = "Transferoviar Călători (TFC)"
-            elif num_str.startswith('105') or num_str.startswith('106'):
-                operator = "Interregional Călători"
-            elif num_str.startswith('11') and len(num_str) == 5:
-                operator = "Regio Călători"
-        except:
-            pass
             
         return {
             'rank': category,

@@ -187,37 +187,9 @@ def parse_infofer_html(html, station_name):
             route_name = other_station_link.get_text(strip=True) if other_station_link else "Unknown"
             
             # 4. Operator 
-            # Look for operator name or logo
-            operator = "CFR Călători" # Default
-            
-            # Use train number guessing as it's more reliable than broad text search
-            try:
-                num_str = "".join(filter(str.isdigit, str(train_number)))
-                if num_str.startswith('116') and len(num_str) == 5:
-                    operator = "Softrans"
-                elif (num_str.startswith('115') or num_str.startswith('155')) and len(num_str) == 5:
-                    operator = "Astra Trans Carpatic"
-                elif num_str.startswith('10') and len(num_str) == 5:
-                    operator = "Transferoviar Călători (TFC)"
-                elif num_str.startswith('105') or num_str.startswith('106'):
-                    operator = "Interregional Călători"
-                elif num_str.startswith('11') and len(num_str) == 5:
-                    operator = "Regio Călători"
-            except:
-                pass
-            
-            # If still default, check for specific keywords in a safer way 
-            # (only if they appear without the "buy tickets" context)
-            if operator == "CFR Călători":
-                text_lower = all_text.lower()
-                # Exclude strings that look like ticket ads
-                safe_text = text_lower.replace('cumpără online bilete softrans', '').replace('bilete softrans', '')
-                
-                if 'softrans' in safe_text: operator = "Softrans"
-                elif 'astra' in safe_text: operator = "Astra Trans Carpatic"
-                elif 'regio' in safe_text: operator = "Regio Călători"
-                elif 'tfc' in safe_text or 'transferoviar' in safe_text: operator = "Transferoviar Călători (TFC)"
-                elif 'interregional' in safe_text: operator = "Interregional Călători"
+            # Default to CFR Călători - accuracy is improved by the detailed train page fetch
+            operator = "CFR Călători"
+
             
             # 5. Delay
             delay = 0
