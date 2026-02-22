@@ -1305,17 +1305,25 @@ def search_stations(query):
         return jsonify([])
     
     try:
+        import unicodedata
+        def normalize_str(s):
+            return unicodedata.normalize('NFKD', s).encode('ASCII', 'ignore').decode('utf-8').lower()
+            
         matching_stations = []
-        query_lower = query.lower()
+        query_norm = normalize_str(query)
+        
+        # Point 'bucuresti nord' queries to 'bucuresti nord gr.a'
+        if query_norm == "bucuresti nord":
+            query_norm = "bucuresti nord gr.a"
         
         for station in stations:
-            station_name_lower = station["name"].lower()
-            if query_lower in station_name_lower:
+            station_name_norm = normalize_str(station["name"])
+            if query_norm in station_name_norm:
                 # Calculate relevance score
                 score = 100
-                if station_name_lower.startswith(query_lower):
+                if station_name_norm.startswith(query_norm):
                     score = 200  # Higher score for starts with
-                if station_name_lower == query_lower:
+                if station_name_norm == query_norm:
                     score = 300  # Highest score for exact match
                 
                 matching_stations.append({
