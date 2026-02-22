@@ -72,6 +72,9 @@ def get_real_train_data(train_id):
         
         result_soup = BeautifulSoup(result_response.content, 'html.parser')
         
+        with open('debug_html.html', 'w', encoding='utf-8') as f:
+            f.write(result_response.text)
+        
         # Step 3: Parse all branches. The page has one button + div pair per branch.
         # Buttons have id="button-group-XXXXX", divs have id="div-stations-branch-XXXXX".
         # We parse every branch and return them all so the frontend can offer a selector.
@@ -230,12 +233,23 @@ def get_real_train_data(train_id):
         # For backward-compat: expose the longest branch as the default `stations_data`
         stations_data = max(branches, key=lambda b: len(b['stations_data']))['stations_data']
 
-        print(f"Found {len(branches)} branch(es), {len(stations_data)} stations in main branch")
+        # Step 4: Extract warnings/alerts (e.g. transbordare auto, route changes)
+        alerts_set = set()
+        for s in [soup, result_soup]:
+            for alert_box in s.find_all('div', class_=lambda c: c and 'alert' in c.lower()):
+                text = alert_box.get_text(separator=' ', strip=True)
+                if text and len(text) > 10 and 'Fără internet' not in text:
+                    alerts_set.add(text)
+        
+        alerts = list(alerts_set)
+
+        print(f"Found {len(branches)} branch(es), {len(stations_data)} stations in main branch, {len(alerts)} alerts")
         
         return {
             'train_number': numeric_train_id,
             'stations_data': stations_data,
             'branches': branches,
+            'alerts': alerts,
             'category': train_id.replace(numeric_train_id, '').strip(),
             'data_source': 'mersultrenurilor_live'
         }
