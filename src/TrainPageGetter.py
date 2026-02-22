@@ -89,19 +89,30 @@ def get_real_train_data(train_id):
                 arrival_time = time_divs[0].get_text(strip=True) if len(time_divs) > 0 else None
                 departure_time = time_divs[1].get_text(strip=True) if len(time_divs) > 1 else arrival_time
                 
-                delay_divs = item.find_all('div', class_=['color-firebrick', 'color-darkgreen'])
+                delay_divs = item.find_all('div', class_=lambda c: c and ('color-' in c or 'delay' in c))
                 parsed_delay = None
                 
+                # First check specific colored divs (firebrick, darkgreen, goldenrod, orange, etc)
                 if delay_divs:
                     for delay_div in delay_divs:
-                        delay_text = delay_div.get_text(strip=True)
-                        if 'la timp' in delay_text.lower():
+                        delay_text = delay_div.get_text(strip=True).lower()
+                        if 'la timp' in delay_text:
                             parsed_delay = 0
                             break
-                        delay_match = re.search(r'([+\-]\d+)\s*min', delay_text)
+                        delay_match = re.search(r'([+\-]?\d+)\s*min', delay_text)
                         if delay_match:
-                            parsed_delay = int(delay_match.group(1))
+                            parsed_delay = int(delay_match.group(1).replace('+', ''))
                             break
+                
+                # If still not found, search the entire item text for estimated/actual delay texts
+                if parsed_delay is None:
+                    full_text = item.get_text(separator=' ', strip=True).lower()
+                    if 'la timp' in full_text:
+                        parsed_delay = 0
+                    else:
+                        delay_match = re.search(r'(?:întârzier\w*|intarzier\w*|estimat\w*)\s*(?:estimată)?\s*:?\s*([+\-]?\d+)\s*min', full_text)
+                        if delay_match:
+                            parsed_delay = int(delay_match.group(1).replace('+', ''))
                             
                 # Intelligent delay propagation:
                 # If CFR explicitly says there's a delay, we trust it and update our tracker.
