@@ -753,7 +753,9 @@ def timestamp_current_filter(timetable):
 @app.route('/station/<int:station_id>/departures')
 def get_departures_timetable(station_id):
     try:
-        timetable = StationTimetableGetter.get_timetable(station_id)
+        # Resolve station name for Infofer scraper
+        station_name = next((s["name"] for s in stations if str(s.get("station_id")) == str(station_id)), None)
+        timetable = StationTimetableGetter.get_timetable(station_id, station_name=station_name)
         timetable = timetable_departures_filter(timetable)
         return jsonify(timetable)
     except Exception as e:
@@ -833,7 +835,9 @@ def get_current_departures_by_name(station_name):
 @app.route('/station/<int:station_id>/arrivals')
 def get_arrivals_timetable(station_id):
     try:
-        timetable = StationTimetableGetter.get_timetable(station_id)
+        # Resolve station name for Infofer scraper
+        station_name = next((s["name"] for s in stations if str(s.get("station_id")) == str(station_id)), None)
+        timetable = StationTimetableGetter.get_timetable(station_id, station_name=station_name)
         timetable = timetable_arrivals_filter(timetable)
         return jsonify(timetable)
     except Exception as e:
