@@ -350,7 +350,7 @@ def get_train_enhanced(train_id):
     try:
         # Get optional parameters
         search_date = request.args.get('date')
-        filter_stops = request.args.get('filter_stops', 'true').lower() == 'true'
+        filter_stops = request.args.get('filter_stops', 'false').lower() == 'true'
         
         # Try to get real-time data from IRIS first
         logger.info(f"Attempting to fetch real-time data from IRIS for train {train_id}")

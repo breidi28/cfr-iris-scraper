@@ -159,6 +159,16 @@ def get_real_train_data(train_id):
                     except Exception:
                         dwell_minutes = 0
 
+                # Determine if it's a commercial stop
+                # Rules: 
+                # 1. Not having 'not-displayed' class
+                # 2. Having 'oprire' in text
+                # 3. Being first/last in the list
+                is_stop = 'not-displayed' not in item.get('class', [])
+                full_text = item.get_text(separator=' ', strip=True)
+                if 'oprire' in full_text.lower() or 'Pleacă la' in full_text or 'Sosește la' in full_text:
+                    is_stop = True
+
                 stops.append({
                     'station_name': station_name,
                     'arrival_time': arrival_time,
@@ -166,6 +176,7 @@ def get_real_train_data(train_id):
                     'delay': delay_minutes,
                     'platform': platform,
                     'dwell_minutes': dwell_minutes,
+                    'is_stop': is_stop
                 })
             return stops
 
