@@ -367,6 +367,9 @@ def get_train_enhanced(train_id):
                     "stations": stations_list,
                     "stops": stations_list,  # Include both for compatibility
                     "branches": branches,
+                    "operator": iris_data.get('operator', 'CFR Călători'),
+                    "category": iris_data.get('category', ''),
+                    "alerts": iris_data.get('alerts', []),
                     "data_source": {
                         "type": "iris_real_time",
                         "source": "mersultrenurilor.infofer.ro (Real-time)",
@@ -459,6 +462,22 @@ def search_trains_with_date():
             }), 400
         
         results = search_government_trains(query, search_date)
+        if not results:
+            results = []
+            
+        import re
+        numeric_match = re.search(r'\d{2,}', query)
+        if numeric_match:
+            exact_number = numeric_match.group(0)
+            already_exists = any(exact_number == ''.join(filter(str.isdigit, str(r.get('train_number', '')))) for r in results)
+            if not already_exists:
+                custom_query = query.upper().strip()
+                results.append({
+                    "train_number": custom_query,
+                    "route": f"Caută orice tren {custom_query} (privat/CFR)",
+                    "operator": "Sistem național integrat",
+                    "id": custom_query
+                })
         
         return jsonify({
             "query": query,

@@ -243,13 +243,29 @@ def get_real_train_data(train_id):
         
         alerts = list(alerts_set)
 
-        print(f"Found {len(branches)} branch(es), {len(stations_data)} stations in main branch, {len(alerts)} alerts")
+        # Step 5: Identify the operator (CFR, Softrans, Astra, etc.)
+        operator = "CFR Călători" # Default
+        full_page_text = (soup.get_text() + " " + result_soup.get_text()).lower()
+        
+        if 'softrans' in full_page_text:
+            operator = "Softrans"
+        elif 'astra trans' in full_page_text:
+            operator = "Astra Trans Carpatic"
+        elif 'regio calatori' in full_page_text or 'regio călători' in full_page_text:
+            operator = "Regio Călători"
+        elif 'transferoviar' in full_page_text:
+            operator = "Transferoviar Călători (TFC)"
+        elif 'interregional' in full_page_text:
+            operator = "Interregional Călători"
+        
+        print(f"Found {len(branches)} branch(es), {len(stations_data)} stations in main branch, {len(alerts)} alerts. Operator: {operator}")
         
         return {
             'train_number': numeric_train_id,
             'stations_data': stations_data,
             'branches': branches,
             'alerts': alerts,
+            'operator': operator,
             'category': train_id.replace(numeric_train_id, '').strip(),
             'data_source': 'mersultrenurilor_live'
         }
