@@ -181,12 +181,16 @@ class GovernmentDataIntegration:
             return None
             
         # Filter stations to show only actual passenger stops if requested
+        # First add 'is_stop' attribute to all stations for the frontend
+        for station in route:
+            # A station is a stop if it's the first station, last station, or has stop_type 'C'
+            # (Note: government XML uses 'C' for commercial stops, 'N' for passing points)
+            station['is_stop'] = station.get('stop_type') == 'C' or station == route[0] or station == route[-1]
+
         if filter_stops:
             # Only include stations where passengers can actually board/alight
-            filtered_route = [station for station in route if station.get('stop_type') == 'N']
-            route = filtered_route if filtered_route else route  # Fallback to all stations if no 'N' stops found
-            
-        # Convert to app format
+            filtered_route = [station for station in route if station['is_stop']]
+            route = filtered_route if filtered_route else route  # Fallback to all stations if no 'C' stops found
         app_data = {
             "train_number": f"{train_info['category']} {clean_number}",
             "last_updated": datetime.now().isoformat(),
