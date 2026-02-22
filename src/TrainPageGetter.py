@@ -270,6 +270,21 @@ def get_real_train_data(train_id):
             operator = "Transferoviar Călători (TFC)"
         elif 'interregional' in full_page_text:
             operator = "Interregional Călători"
+        else:
+            try:
+                num_str = "".join(filter(str.isdigit, str(numeric_train_id)))
+                if num_str.startswith('116') and len(num_str) == 5:
+                    operator = "Softrans"
+                elif (num_str.startswith('115') or num_str.startswith('155')) and len(num_str) == 5:
+                    operator = "Astra Trans Carpatic"
+                elif num_str.startswith('10') and len(num_str) == 5:
+                    operator = "Transferoviar Călători (TFC)"
+                elif num_str.startswith('105') or num_str.startswith('106'):
+                    operator = "Interregional Călători"
+                elif num_str.startswith('11') and len(num_str) == 5:
+                    operator = "Regio Călători"
+            except:
+                pass
         
         print(f"Found {len(branches)} branch(es), {len(stations_data)} stations in main branch, {len(alerts)} alerts. Operator: {operator}")
         

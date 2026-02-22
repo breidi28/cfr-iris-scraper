@@ -199,6 +199,23 @@ def parse_iris_train_row(cells, station_code):
         # Format train_id consistently with government data
         train_id = f"{category}{train_number}" if category else train_number
         
+        # Guess operator based on train number
+        operator = "CFR Călători"
+        try:
+            num_str = "".join(filter(str.isdigit, str(train_number)))
+            if num_str.startswith('116') and len(num_str) == 5:
+                operator = "Softrans"
+            elif (num_str.startswith('115') or num_str.startswith('155')) and len(num_str) == 5:
+                operator = "Astra Trans Carpatic"
+            elif num_str.startswith('10') and len(num_str) == 5:
+                operator = "Transferoviar Călători (TFC)"
+            elif num_str.startswith('105') or num_str.startswith('106'):
+                operator = "Interregional Călători"
+            elif num_str.startswith('11') and len(num_str) == 5:
+                operator = "Regio Călători"
+        except:
+            pass
+            
         return {
             'rank': category,  # Category for badge display
             'train_id': train_id,  # Full train identifier
@@ -214,7 +231,7 @@ def parse_iris_train_row(cells, station_code):
             'is_origin': is_origin,
             'is_destination': is_destination,
             'is_stop': is_stop,
-            'operator': 'CFR Călători',
+            'operator': operator,
             'station_code': station_code,
             'data_source': 'iris_live',
             'mentions': ""
@@ -276,6 +293,23 @@ def parse_iris_train_div(container, station_code):
         # Format train_id consistently
         train_id = f"{category}{train_number}" if category else train_number
         
+        # Guess operator based on train number
+        operator = "CFR Călători"
+        try:
+            num_str = "".join(filter(str.isdigit, str(train_number)))
+            if num_str.startswith('116') and len(num_str) == 5:
+                operator = "Softrans"
+            elif (num_str.startswith('115') or num_str.startswith('155')) and len(num_str) == 5:
+                operator = "Astra Trans Carpatic"
+            elif num_str.startswith('10') and len(num_str) == 5:
+                operator = "Transferoviar Călători (TFC)"
+            elif num_str.startswith('105') or num_str.startswith('106'):
+                operator = "Interregional Călători"
+            elif num_str.startswith('11') and len(num_str) == 5:
+                operator = "Regio Călători"
+        except:
+            pass
+            
         return {
             'rank': category,
             'train_id': train_id,
@@ -291,7 +325,7 @@ def parse_iris_train_div(container, station_code):
             'is_origin': departure_time and not arrival_time,
             'is_destination': arrival_time and not departure_time,
             'is_stop': arrival_time and departure_time,
-            'operator': 'CFR Călători',
+            'operator': operator,
             'station_code': station_code,
             'data_source': 'iris_live',
             'mentions': ""
