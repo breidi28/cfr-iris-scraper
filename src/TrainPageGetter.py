@@ -258,33 +258,40 @@ def get_real_train_data(train_id):
 
         # Step 5: Identify the operator (CFR, Softrans, Astra, etc.)
         operator = "CFR Călători" # Default
-        full_page_text = (soup.get_text() + " " + result_soup.get_text()).lower()
         
-        if 'softrans' in full_page_text:
-            operator = "Softrans"
-        elif 'astra trans' in full_page_text:
-            operator = "Astra Trans Carpatic"
-        elif 'regio calatori' in full_page_text or 'regio călători' in full_page_text:
-            operator = "Regio Călători"
-        elif 'transferoviar' in full_page_text:
-            operator = "Transferoviar Călători (TFC)"
-        elif 'interregional' in full_page_text:
-            operator = "Interregional Călători"
-        else:
-            try:
-                num_str = "".join(filter(str.isdigit, str(numeric_train_id)))
-                if num_str.startswith('116') and len(num_str) == 5:
+        # Try guessing based on train number first (most reliable)
+        try:
+            num_str = "".join(filter(str.isdigit, str(numeric_train_id)))
+            if num_str.startswith('116') and len(num_str) == 5:
+                operator = "Softrans"
+            elif (num_str.startswith('115') or num_str.startswith('155')) and len(num_str) == 5:
+                operator = "Astra Trans Carpatic"
+            elif num_str.startswith('10') and len(num_str) == 5:
+                operator = "Transferoviar Călători (TFC)"
+            elif num_str.startswith('105') or num_str.startswith('106'):
+                operator = "Interregional Călători"
+            elif num_str.startswith('11') and len(num_str) == 5:
+                operator = "Regio Călători"
+            else:
+                # If number doesn't match, search for text in specific elements only (not the whole page)
+                # Operators usually have their names in specific labels or next to "Operator"
+                full_page_text = (soup.get_text() + " " + result_soup.get_text()).lower()
+                
+                # Exclude the known advertisement strings
+                safe_text = full_page_text.replace('cumpără online bilete softrans', '').replace('bilete softrans', '')
+                
+                if 'softrans' in safe_text and ('operat de' in safe_text or 'operator' in safe_text):
                     operator = "Softrans"
-                elif (num_str.startswith('115') or num_str.startswith('155')) and len(num_str) == 5:
+                elif 'astra trans' in safe_text:
                     operator = "Astra Trans Carpatic"
-                elif num_str.startswith('10') and len(num_str) == 5:
-                    operator = "Transferoviar Călători (TFC)"
-                elif num_str.startswith('105') or num_str.startswith('106'):
-                    operator = "Interregional Călători"
-                elif num_str.startswith('11') and len(num_str) == 5:
+                elif 'regio calatori' in safe_text or 'regio călători' in safe_text:
                     operator = "Regio Călători"
-            except:
-                pass
+                elif 'transferoviar' in safe_text:
+                    operator = "Transferoviar Călători (TFC)"
+                elif 'interregional' in full_page_text:
+                    operator = "Interregional Călători"
+        except:
+            pass
         
         print(f"Found {len(branches)} branch(es), {len(stations_data)} stations in main branch, {len(alerts)} alerts. Operator: {operator}")
         
