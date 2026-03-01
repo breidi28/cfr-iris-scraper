@@ -23,6 +23,8 @@ The API uses a **hybrid data approach** to provide the best possible information
     - Train routes and stops
     - Live delays (calculated from real-time sources)
     - Passenger reporting system (crowding, delays, tips)
+- **Aggressive Caching**: Prevents spamming Infofer servers via heavy TTL cache mechanisms.
+- **Fast Content**: Employs `Flask-Compress` for brotli/gzip response compression.
 
 ## 🛠️ Installation & Requirements
 
@@ -30,6 +32,8 @@ The API uses a **hybrid data approach** to provide the best possible information
 - Flask
 - BeautifulSoup4 (for scraping)
 - Requests
+- Cachetools
+- Flask-Compress
 
 ```bash
 # Install dependencies
@@ -70,6 +74,26 @@ app you are consuming the data with to: http://localhost:5000/station/10017.
 In the same way you can get the current trains in a certain railway station, you can get the current information for a
 certain train. CFR provides information such as delays, the last station the train has passed (with a 7-minute delay),
 the next station and other useful information.
+
+#### Enhanced live data
+The backend now scrapes **CFR Călători's ticketing site** (`bilete.cfrcalatori.ro`) to obtain additional details about
+train facilities (air-conditioning, bicycle spaces, reserved seats, etc.) and the exact carriage layout. When available
+this information is included in the JSON response as `services` and raw `composition_html` fields. In addition we
+parse the station‑specific ordering of coaches and return it as a `coach_order` map so clients can show which car
+numbers will be at each stop on the route, exactly like the “Compunerea și ordinea vagoanelor în stația” box on the
+website.  Starting with the latest update we also extract the station list used by the dropdown selector on the CFR
+page (`station_options`) and a `coach_classes` table which maps each carriage number to its published class (e.g.
+“Clasa a 2-a”).  Mobile/web clients can offer a picker for the stop and annotate each coach with its class.  All of
+this extra metadata is returned when using the CFR scraper; if the site is unreachable or the format changes the
+system gracefully falls back to the older Infofer (`mersultrenurilor.infofer.ro`) source.
+
+You may also use the dedicated composition endpoint:
+
+```
+GET /api/train/<ID>/composition
+```
+
+which returns only the carriage map or a synthetic demo if live data is absent.
 
 Just point your browser to http://localhost:5000/train/ID, where ID is the train's unique number. You can get these IDs
 from the station information feed. For example, you can retrieve the information for train IR 1651 from Bucharest North

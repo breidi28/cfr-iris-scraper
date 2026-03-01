@@ -1,7 +1,8 @@
 from src import StationsGetter, StationTimetableGetter, config
-from src.TrainPageGetter import get_real_train_data
+from src.TrainPageGetter import get_train, get_real_train_data
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+from flask_compress import Compress
 from datetime import datetime, timedelta
 from dateutil import tz, parser
 import logging
@@ -9,9 +10,12 @@ import json
 import sqlite3
 import os
 import random
+import threading
+import re
 
 app = Flask(__name__)
 CORS(app)
+Compress(app)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -20,91 +24,90 @@ logger = logging.getLogger(__name__)
 # Initialize passenger reports database
 def init_passenger_db():
     """Initialize SQLite database for passenger reports and interactions"""
-    if not os.path.exists('passenger_data.db'):
-        conn = sqlite3.connect('passenger_data.db')
-        cursor = conn.cursor()
-        
-        # Create tables for passenger reports
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS passenger_reports (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            train_number TEXT NOT NULL,
-            report_type TEXT NOT NULL,
-            message TEXT,
-            platform TEXT,
-            delay_minutes INTEGER,
-            crowding_level TEXT,
-            station_name TEXT,
-            reported_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            verified_count INTEGER DEFAULT 0,
-            helpful_count INTEGER DEFAULT 0,
-            user_ip TEXT
-        )
-        ''')
-        
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS seat_availability (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            train_number TEXT NOT NULL,
-            car_number TEXT,
-            available_seats INTEGER,
-            total_seats INTEGER,
-            station_name TEXT,
-            reported_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            user_ip TEXT
-        )
-        ''')
-        
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS passenger_tips (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            station_name TEXT,
-            tip_type TEXT NOT NULL,
-            message TEXT NOT NULL,
-            helpful_count INTEGER DEFAULT 0,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            user_ip TEXT
-        )
-        ''')
-        
-        conn.commit()
-        conn.close()
-        logger.info("Passenger database initialized")
+    # Always attempt table creation (IF NOT EXISTS is safe to run repeatedly)
+    conn = sqlite3.connect('passenger_data.db')
+    cursor = conn.cursor()
+
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS passenger_reports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        train_number TEXT NOT NULL,
+        report_type TEXT NOT NULL,
+        message TEXT,
+        platform TEXT,
+        delay_minutes INTEGER,
+        crowding_level TEXT,
+        station_name TEXT,
+        reported_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        verified_count INTEGER DEFAULT 0,
+        helpful_count INTEGER DEFAULT 0,
+        user_ip TEXT
+    )
+    ''')
+
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS seat_availability (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        train_number TEXT NOT NULL,
+        car_number TEXT,
+        available_seats INTEGER,
+        total_seats INTEGER,
+        station_name TEXT,
+        reported_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        user_ip TEXT
+    )
+    ''')
+
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS passenger_tips (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        station_name TEXT,
+        tip_type TEXT NOT NULL,
+        message TEXT NOT NULL,
+        helpful_count INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        user_ip TEXT
+    )
+    ''')
+
+    conn.commit()
+    conn.close()
+    logger.info("Passenger database initialized")
 
 # Initialize the database
 init_passenger_db()
 
 # Generate the station lookup table with error handling
 config.global_station_list = {}
-stations = []
+stations: list[dict] = []
 
 def get_demo_stations():
     """Comprehensive station list for Romanian Railway Network"""
     return [
         # Major cities and hubs
-        {"name": "București Nord", "station_id": "10001"},
-        {"name": "București Basarab", "station_id": "10101"},
-        {"name": "București Obor", "station_id": "10102"},
-        {"name": "Cluj-Napoca", "station_id": "10002"},
-        {"name": "Constanța", "station_id": "10003"},
-        {"name": "Brașov", "station_id": "10004"},
-        {"name": "Timișoara Nord", "station_id": "10005"},
-        {"name": "Iași", "station_id": "10006"},
-        {"name": "Craiova", "station_id": "10007"},
-        {"name": "Galați", "station_id": "10008"},
-        {"name": "Ploiești Sud", "station_id": "10009"},
-        {"name": "Ploiești Vest", "station_id": "10109"},
-        {"name": "Oradea", "station_id": "10010"},
-        {"name": "Arad", "station_id": "10011"},
-        {"name": "Deva", "station_id": "10012"},
-        {"name": "Târgu Mureș", "station_id": "10013"},
-        {"name": "Sibiu", "station_id": "10014"},
-        {"name": "Bacău", "station_id": "10015"},
-        {"name": "Pitești", "station_id": "10016"},
-        {"name": "Suceava", "station_id": "10017"},
-        {"name": "Satu Mare", "station_id": "10018"},
-        {"name": "Baia Mare", "station_id": "10019"},
-        {"name": "Reșița", "station_id": "10020"},
+        {"name": "București Nord", "station_id": "bucuresti-nord"},
+        {"name": "București Basarab", "station_id": "bucuresti-basarab"},
+        {"name": "București Obor", "station_id": "bucuresti-obor"},
+        {"name": "Cluj-Napoca", "station_id": "cluj-napoca"},
+        {"name": "Constanța", "station_id": "constanta"},
+        {"name": "Brașov", "station_id": "brasov"},
+        {"name": "Timișoara Nord", "station_id": "timisoara-nord"},
+        {"name": "Iași", "station_id": "iasi"},
+        {"name": "Craiova", "station_id": "craiova"},
+        {"name": "Galați", "station_id": "galati"},
+        {"name": "Ploiești Sud", "station_id": "ploiesti-sud"},
+        {"name": "Ploiești Vest", "station_id": "ploiesti-vest"},
+        {"name": "Oradea", "station_id": "oradea"},
+        {"name": "Arad", "station_id": "arad"},
+        {"name": "Deva", "station_id": "deva"},
+        {"name": "Târgu Mureș", "station_id": "targu-mures"},
+        {"name": "Sibiu", "station_id": "sibiu"},
+        {"name": "Bacău", "station_id": "bacau"},
+        {"name": "Pitești", "station_id": "pitesti"},
+        {"name": "Suceava", "station_id": "suceava"},
+        {"name": "Satu Mare", "station_id": "satu-mare"},
+        {"name": "Baia Mare", "station_id": "baia-mare"},
+        {"name": "Reșița", "station_id": "resita"},
         
         # Regional centers and important towns
         {"name": "Alba Iulia", "station_id": "10021"},
@@ -238,18 +241,30 @@ def get_demo_stations():
         {"name": "Jibou", "station_id": "10150"}
     ]
 
-try:
-    stations = StationsGetter.get_stations()
-    for station in stations:
-        config.global_station_list[station["name"]] = station["station_id"]
-    logger.info(f"Successfully loaded {len(stations)} stations from external API")
-except Exception as e:
-    logger.error(f"Failed to fetch stations from external API: {e}")
-    logger.info("Using demo station list as fallback")
-    stations = get_demo_stations()
-    for station in stations:
-        config.global_station_list[station["name"]] = station["station_id"]
-    logger.info(f"Loaded {len(stations)} demo stations")
+# Initialize with demo stations immediately to prevent blocking
+stations = get_demo_stations()
+for station in stations:
+    config.global_station_list[station["name"]] = station["station_id"]
+logger.info(f"Initially loaded {len(stations)} demo stations")
+
+def background_load_stations():
+    global stations
+    try:
+        logger.info("Background: Fetching real stations from external API...")
+        real_stations = StationsGetter.get_stations()
+        if real_stations and len(real_stations) > 20:
+            stations = real_stations
+            # Rebuild lookup table
+            new_lookup = {}
+            for s in stations:
+                new_lookup[s["name"]] = s["station_id"]
+            config.global_station_list = new_lookup
+            logger.info(f"Background: Successfully updated with {len(stations)} real stations")
+    except Exception as e:
+        logger.error(f"Background station fetch failed: {e}")
+
+# Start background fetch to avoid blocking the main thread/worker
+threading.Thread(target=background_load_stations, daemon=True).start()
 
 
 @app.route('/api')
@@ -334,33 +349,53 @@ def data_sources_info():
 @app.route('/api/train/<string:train_id>')
 @app.route('/train/<string:train_id>')
 def get_train_enhanced(train_id):
-    """Enhanced train endpoint: uses only IRIS (Infofer) real-time data"""
+    """Enhanced train endpoint: retrieves real train info.
+
+    The implementation now calls :func:`get_train` which prefers the CFR
+    Călători ticketing site and falls back to Infofer.  Additional keys such
+    as ``services`` and ``composition_html`` are preserved when available.
+    """
     try:
-        # Get optional parameters
         search_date = request.args.get('date')
         filter_stops = request.args.get('filter_stops', 'false').lower() == 'true'
-        
-        logger.info(f"Fetching real-time data from Infofer for train {train_id}")
-        iris_data = get_real_train_data(train_id)
-        if iris_data and 'stations_data' in iris_data:
-            logger.info(f"✅ Got real-time Infofer data for train {train_id}")
-            stations_list = iris_data['stations_data']
-            branches = iris_data.get('branches', [{'label': 'Rută', 'stations_data': stations_list}])
-            return jsonify({
+
+        logger.info(f"Fetching real-time train data for {train_id}")
+        train_data = get_train(train_id)
+        if train_data and 'stations_data' in train_data:
+            source = train_data.get('data_source', 'unknown')
+            logger.info(f"✅ Got data from {source} for train {train_id}")
+            stations_list = train_data['stations_data']
+            branches = train_data.get('branches', [{'label': 'Rută', 'stations_data': stations_list}])
+
+            response = {
                 "train_number": train_id,
                 "stations": stations_list,
-                "stops": stations_list,  # Include both for compatibility
+                "stops": stations_list,
                 "branches": branches,
-                "operator": iris_data.get('operator', 'CFR Călători'),
-                "category": iris_data.get('category', ''),
-                "alerts": iris_data.get('alerts', []),
+                "operator": train_data.get('operator', 'CFR Călători'),
+                "category": train_data.get('category', ''),
+                "alerts": train_data.get('alerts', []),
                 "data_source": {
-                    "type": "infofer_real_time",
-                    "source": "mersultrenurilor.infofer.ro",
-                    "timestamp": datetime.now().isoformat(),
-                    "has_live_delays": True
+                    "type": source,
+                    "timestamp": datetime.now().isoformat()
                 }
-            })
+            }
+
+            # include CFR-specific extras if present
+            if 'services' in train_data:
+                response['services'] = train_data['services']
+            if 'composition_html' in train_data:
+                response['composition_html'] = train_data['composition_html']
+            if 'coach_order' in train_data:
+                response['coach_order'] = train_data['coach_order']
+            if 'coach_classes' in train_data:
+                response['coach_classes'] = train_data['coach_classes']
+            if 'station_options' in train_data:
+                response['station_options'] = train_data['station_options']
+            if 'all_coaches' in train_data:
+                response['all_coaches'] = train_data['all_coaches']
+
+            return jsonify(response)
         else:
             return jsonify({
                 "error": f"Train {train_id} not found",
@@ -376,6 +411,16 @@ def get_train_enhanced(train_id):
         }), 500
 
 
+def get_data_validity_info():
+    """Return basic information about when data was last refreshed."""
+    return {
+        "timestamp": datetime.now().isoformat(),
+        "valid_until": (datetime.now() + timedelta(minutes=1)).isoformat(),
+        "source": "infofer_live",
+        "note": "Data is fetched live from Infofer on every request (TTL cache: 45s)"
+    }
+
+
 @app.route('/api/data-validity')
 def get_data_validity():
     """Get information about data validity period"""
@@ -389,34 +434,108 @@ def get_data_validity():
         }), 500
 
 
+
+
+
 @app.route('/api/search/trains')
 def search_trains_with_date():
-    """Simple search that allows direct train number lookup without government data"""
+    """Search for trains by number.
+
+    - If the query already contains a known prefix (e.g. "IC 534" or "IC534"),
+      return only that one canonical suggestion.
+    - If the query is a bare number (e.g. "534"), actually fetch the train from
+      CFR/Infofer to discover its real category, then return that single real result.
+      If the train is not found the result list is empty — no phantom suggestions.
+    """
     try:
         query = request.args.get('q', '').upper().strip()
         if not query:
             return jsonify({"results": []})
-            
-        # Since we don't have a static database anymore, we treat the query as a train number
-        results = [{
-            "train_number": query,
-            "route": f"Vizualizează traseu live tren {query}",
-            "operator": "Operator feroviar",
-            "id": query
-        }]
-        
+
+        # Known Romanian rail categories, longest first to avoid partial matches
+        KNOWN_PREFIXES = ["IRN", "R-E", "IC", "IR", "RE", "EN", "EC", "R", "P", "D", "A"]
+
+        detected_prefix = None
+        numeric_part = None
+
+        # 1. "PREFIX NUMBER" with space  (e.g. "IC 534")
+        if ' ' in query:
+            parts = query.split(' ', 1)
+            if parts[0] in KNOWN_PREFIXES and parts[1].isdigit():
+                detected_prefix = parts[0]
+                numeric_part = parts[1]
+
+        # 2. "PREFIXNUMBER" without space  (e.g. "IC534")
+        if detected_prefix is None:
+            m = re.match(r'^([A-Z][A-Z-]*)(\d+)$', query)
+            if m and m.group(1) in KNOWN_PREFIXES:
+                detected_prefix = m.group(1)
+                numeric_part = m.group(2)
+
+        # 3. Pure number  (e.g. "534")
+        if detected_prefix is None and query.isdigit():
+            numeric_part = query
+
+        # 4. Last-resort: strip non-digits
+        if numeric_part is None:
+            stripped = re.sub(r'\D', '', query)
+            if stripped:
+                numeric_part = stripped
+
+        if not numeric_part:
+            return jsonify({"query": query, "results": [], "count": 0,
+                            "data_source": "normalized_search"})
+
+        if detected_prefix:
+            # User already specified a prefix — return the one canonical form
+            canonical = f"{detected_prefix} {numeric_part}"
+            results = [{
+                "train_number": canonical,
+                "route": f"Tren {canonical}",
+                "operator": "CFR Călători",
+                "id": canonical.replace(' ', '')
+            }]
+            data_source = "prefix_match"
+        else:
+            # Bare number — look up the real train to find its actual category
+            results = []
+            data_source = "live_lookup"
+            try:
+                train_data = get_train(numeric_part)
+                if train_data and train_data.get('stations_data'):
+                    # get_train returns 'category' (e.g. "IC", "IR", "R", …)
+                    category = (train_data.get('category') or '').strip().upper()
+                    if not category:
+                        # Try to infer from the page title / header text if category missing
+                        category = "R"  # conservative fallback
+                    canonical = f"{category} {numeric_part}"
+                    operator = train_data.get('operator', 'CFR Călători')
+                    # Build a short route hint from first + last stop
+                    stops = train_data['stations_data']
+                    if len(stops) >= 2:
+                        route_hint = f"{stops[0]['station_name']} → {stops[-1]['station_name']}"
+                    else:
+                        route_hint = f"Tren {canonical}"
+                    results = [{
+                        "train_number": canonical,
+                        "route": route_hint,
+                        "operator": operator,
+                        "id": canonical.replace(' ', '')
+                    }]
+            except Exception as lookup_err:
+                logger.info(f"Live lookup for '{numeric_part}' failed: {lookup_err}")
+                # Return empty — don't show fake suggestions
+
         return jsonify({
             "query": query,
             "results": results,
             "count": len(results),
-            "data_source": "manual_lookup"
+            "data_source": data_source
         })
-        
+
     except Exception as e:
-        return jsonify({
-            "error": "Search failed",
-            "details": str(e)
-        }), 500
+        logger.error(f"Search failed: {e}")
+        return jsonify({"error": "Search failed", "details": str(e)}), 500
 
 
 def generate_realistic_composition(train_id):
@@ -487,13 +606,8 @@ def get_stations():
 def api_get_stations():
     """API endpoint for stations list - uses scraped data only"""
     try:
-        if stations:
-            # Format nicely for frontend if needed, though they already have name/station_id
-            return jsonify(stations)
-        else:
-            # Try to fetch if empty
-            current_stations = StationsGetter.get_stations()
-            return jsonify(current_stations)
+        # Return whatever we have (demo or real) without blocking
+        return jsonify(stations or [])
     except Exception as e:
         logger.error(f"Error getting stations: {e}")
         return jsonify({
@@ -532,22 +646,24 @@ def reload_stations():
             "fallback_mode": True
         })
 
-
-@app.route('/station/<int:station_id>')
-@app.route('/station/<string:station_id>')
+@app.route('/station/<station_id>')
 def get_timetable(station_id):
     """Get station timetable ONLY from live Infofer scraper"""
     try:
         # 1. Resolve Name: Map numeric or slug ID to the real station name
-        station_name = next((s["name"] for s in stations if str(s.get("station_id")) == str(station_id)), None)
+        station_name = next((s.get("name") for s in stations if str(s.get("station_id")) == str(station_id)), None)
         
         if not station_name:
-            # If not in our list, try using the ID as a slug directly
-            station_name = str(station_id).replace('-', ' ').title()
-            logger.info(f"Station ID {station_id} not in global list, trying as name: {station_name}")
+            # Check if station_id itself is a known name in config
+            if str(station_id) in config.global_station_list:
+                station_name = str(station_id)
+            else:
+                # If not in our list, try using the ID as a slug directly
+                station_name = str(station_id).replace('-', ' ').title()
+                logger.info(f"Station ID {station_id} not in global list, trying as name: {station_name}")
 
         # 2. Fetch from Scraper
-        logger.info(f"Fetching timetable for {station_name} from Infofer live")
+        logger.info(f"Fetching timetable for {station_name} (ID: {station_id}) from Infofer live")
         timetable = StationTimetableGetter.get_timetable(station_id, station_name)
         
         if not timetable:
@@ -591,34 +707,48 @@ def timetable_arrivals_filter(timetable):
 
 
 def timestamp_current_filter(timetable):
+    """Filter timetable for trains within -1h to +3h window, handling naive/aware datetimes."""
     current_timetable = []
+    timezone = tz.gettz('Europe/Bucharest')
+    now_aware = datetime.now(tz=timezone)
+    now_naive = datetime.now()
+    
+    beginning_aware = now_aware - timedelta(hours=1)
+    end_aware = now_aware + timedelta(hours=3)
+    beginning_naive = now_naive - timedelta(hours=1)
+    end_naive = now_naive + timedelta(hours=3)
 
     for item in timetable:
-        timezone = tz.gettz('Europe/Bucharest')
-        beginning = datetime.now(tz=timezone) - timedelta(hours=1)
-        end = datetime.now(tz=timezone) + timedelta(hours=3)
-
-        if item['arrival_timestamp']:
-            arrival = parser.isoparse(item['arrival_timestamp'])
-
-            if beginning <= arrival <= end:
-                current_timetable.append(item)
-                continue
-
-            if beginning <= arrival + timedelta(minutes=item['delay']) <= end:
-                current_timetable.append(item)
-                continue
-
-        if item['departure_timestamp']:
-            departure = parser.isoparse(item['departure_timestamp'])
-
-            if beginning <= departure <= end:
-                current_timetable.append(item)
-                continue
-
-            if beginning <= departure + timedelta(minutes=item['delay']) <= end:
-                current_timetable.append(item)
-                continue
+        # Check both arrival and departure
+        found = False
+        for key in ['arrival_timestamp', 'departure_timestamp']:
+            if item.get(key):
+                try:
+                    ts = parser.isoparse(item[key])
+                    
+                    # Determine which bounds to use based on offset awareness
+                    if ts.tzinfo is not None and ts.tzinfo.utcoffset(ts) is not None:
+                        low, high = beginning_aware, end_aware
+                    else:
+                        low, high = beginning_naive, end_naive
+                        
+                    if low <= ts <= high:
+                        found = True
+                        break
+                    
+                    # Also check with delay
+                    delay = item.get('delay', 0)
+                    if delay:
+                        ts_delayed = ts + timedelta(minutes=delay)
+                        if low <= ts_delayed <= high:
+                            found = True
+                            break
+                except Exception as e:
+                    logger.error(f"Error parsing timestamp {item[key]}: {e}")
+                    continue
+        
+        if found:
+            current_timetable.append(item)
 
     return current_timetable
 
@@ -626,7 +756,7 @@ def timestamp_current_filter(timetable):
 def get_departures_timetable(station_id):
     try:
         # Resolve station name for Infofer scraper
-        station_name = next((s["name"] for s in stations if str(s.get("station_id")) == str(station_id)), None)
+        station_name = next((s.get("name") for s in stations if str(s.get("station_id")) == str(station_id)), None)
         timetable = StationTimetableGetter.get_timetable(station_id, station_name=station_name)
         timetable = timetable_departures_filter(timetable)
         return jsonify(timetable)
@@ -641,11 +771,28 @@ def get_departures_timetable(station_id):
 
 @app.route('/station/<int:station_id>/departures/current')
 def get_current_departures_timetable(station_id):
-    # OPTIMIZATION: Return demo data immediately for faster loading
-    # Skip the slow CFR API calls and provide instant response
-    logger.info(f"Returning demo departures data for station {station_id} (fast mode)")
-    demo_data = generate_demo_station_departures(station_id)
-    return jsonify(demo_data)
+    """Get current departures (within -1/+3 hour window) from real scraper"""
+    try:
+        # Resolve station name for Infofer scraper
+        station_name = next((s.get("name") for s in stations if str(s.get("station_id")) == str(station_id)), None)
+        logger.info(f"Fetching real-time current departures for {station_name or station_id}")
+        
+        timetable = StationTimetableGetter.get_timetable(station_id, station_name=station_name)
+        if not timetable:
+            return jsonify([])
+            
+        # Filter for departures and time window
+        timetable = timetable_departures_filter(timetable)
+        timetable = timestamp_current_filter(timetable)
+        
+        return jsonify(timetable)
+    except Exception as e:
+        logger.error(f"Failed to get current departures for station {station_id}: {e}")
+        # Only fallback if absolutely necessary, but preferably return empty list or error
+        return jsonify({
+            "error": "Real-time data unavailable",
+            "message": str(e)
+        }), 503
 
 
 @app.route('/station/<string:station_name>/departures/current')
@@ -671,44 +818,44 @@ def get_current_departures_by_name(station_name):
         # Find station ID from name
         station_id = None
         for station in stations:
-            if station["name"].lower() == proper_name.lower():
-                station_id = int(station["station_id"])
+            if str(station.get("name", "")).lower() == proper_name.lower():
+                raw_id = station.get("station_id", "")
+                try:
+                    station_id = int(raw_id)
+                except (ValueError, TypeError):
+                    station_id = raw_id  # keep slug as-is
                 break
-                
+
         if station_id is None:
             # Try to find partial match
             for station in stations:
-                if proper_name.lower() in station["name"].lower():
-                    station_id = int(station["station_id"])
+                if proper_name.lower() in str(station.get("name", "")).lower():
+                    raw_id = station.get("station_id", "")
+                    try:
+                        station_id = int(raw_id)
+                    except (ValueError, TypeError):
+                        station_id = raw_id
                     break
-                    
+
         if station_id is None:
-            # Still return demo data even if station not found
-            logger.warning(f"Station not found: {proper_name}, returning demo data")
-            demo_data = generate_demo_station_departures(1)
-            return jsonify(demo_data)
+            logger.warning(f"Station not found: {proper_name}, returning empty list")
+            return jsonify([]), 404
             
         logger.info(f"Found station '{proper_name}' with ID {station_id}")
         
-        # OPTIMIZATION: Return demo data immediately instead of trying CFR API
-        # This makes the app much faster and more responsive
-        logger.info(f"Returning demo data for station {proper_name} (optimization)")
-        demo_data = generate_demo_station_departures(station_id)
-        return jsonify(demo_data)
+        # Use the real-time endpoint instead of demo data
+        return get_current_departures_timetable(station_id)
         
     except Exception as e:
         logger.error(f"Failed to get departures for station name {station_name}: {e}")
-        
-        # Always fallback to demo data for speed
-        demo_data = generate_demo_station_departures(1)
-        return jsonify(demo_data)
+        return jsonify({"error": "Real-time data unavailable", "message": str(e)}), 503
 
 
 @app.route('/station/<int:station_id>/arrivals')
 def get_arrivals_timetable(station_id):
     try:
         # Resolve station name for Infofer scraper
-        station_name = next((s["name"] for s in stations if str(s.get("station_id")) == str(station_id)), None)
+        station_name = next((s.get("name") for s in stations if str(s.get("station_id")) == str(station_id)), None)
         timetable = StationTimetableGetter.get_timetable(station_id, station_name=station_name)
         timetable = timetable_arrivals_filter(timetable)
         return jsonify(timetable)
@@ -723,11 +870,27 @@ def get_arrivals_timetable(station_id):
 
 @app.route('/station/<int:station_id>/arrivals/current')
 def get_current_arrivals_timetable(station_id):
-    # OPTIMIZATION: Return demo data immediately for faster loading
-    # Skip the slow CFR API calls and provide instant response
-    logger.info(f"Returning demo arrivals data for station {station_id} (fast mode)")
-    demo_data = generate_demo_station_arrivals(station_id)
-    return jsonify(demo_data)
+    """Get current arrivals (within -1/+3 hour window) from real scraper"""
+    try:
+        # Resolve station name for Infofer scraper
+        station_name = next((s.get("name") for s in stations if str(s.get("station_id")) == str(station_id)), None)
+        logger.info(f"Fetching real-time current arrivals for {station_name or station_id}")
+        
+        timetable = StationTimetableGetter.get_timetable(station_id, station_name=station_name)
+        if not timetable:
+            return jsonify([])
+            
+        # Filter for arrivals and time window
+        timetable = timetable_arrivals_filter(timetable)
+        timetable = timestamp_current_filter(timetable)
+        
+        return jsonify(timetable)
+    except Exception as e:
+        logger.error(f"Failed to get current arrivals for station {station_id}: {e}")
+        return jsonify({
+            "error": "Real-time data unavailable",
+            "message": str(e)
+        }), 503
 
 
 @app.route('/station/<string:station_name>/arrivals/current')
@@ -753,37 +916,37 @@ def get_current_arrivals_by_name(station_name):
         # Find station ID from name
         station_id = None
         for station in stations:
-            if station["name"].lower() == proper_name.lower():
-                station_id = int(station["station_id"])
+            if str(station.get("name", "")).lower() == proper_name.lower():
+                raw_id = station.get("station_id", "")
+                try:
+                    station_id = int(raw_id)
+                except (ValueError, TypeError):
+                    station_id = raw_id
                 break
-                
+
         if station_id is None:
             # Try to find partial match
             for station in stations:
-                if proper_name.lower() in station["name"].lower():
-                    station_id = int(station["station_id"])
+                if proper_name.lower() in str(station.get("name", "")).lower():
+                    raw_id = station.get("station_id", "")
+                    try:
+                        station_id = int(raw_id)
+                    except (ValueError, TypeError):
+                        station_id = raw_id
                     break
-                    
+
         if station_id is None:
-            # Still return demo data even if station not found
-            logger.warning(f"Station not found: {proper_name}, returning demo data")
-            demo_data = generate_demo_station_arrivals(1)
-            return jsonify(demo_data)
+            logger.warning(f"Station not found: {proper_name}, returning empty list")
+            return jsonify([]), 404
             
         logger.info(f"Found station '{proper_name}' with ID {station_id}")
         
-        # OPTIMIZATION: Return demo data immediately instead of trying CFR API
-        # This makes the app much faster and more responsive
-        logger.info(f"Returning demo arrivals data for station {proper_name} (optimization)")
-        demo_data = generate_demo_station_arrivals(station_id)
-        return jsonify(demo_data)
+        # Use the real-time endpoint instead of demo data
+        return get_current_arrivals_timetable(station_id)
         
     except Exception as e:
         logger.error(f"Failed to get arrivals for station name {station_name}: {e}")
-        
-        # Always fallback to demo data for speed
-        demo_data = generate_demo_station_arrivals(1)
-        return jsonify(demo_data)
+        return jsonify({"error": "Real-time data unavailable", "message": str(e)}), 503
 
 
 # Demo data generator (used internally for fallbacks)
@@ -1263,8 +1426,34 @@ def get_train_composition(train_id):
 
 @app.route('/api/train/<string:train_id>/composition')
 def get_train_composition_api(train_id):
-    """API endpoint to get train composition and facilities"""
+    """API endpoint to get train composition and facilities.
+
+    When the CFR Călători scraper provides raw ``composition_html`` we
+    return it directly; otherwise fall back to the built-in demo generator.
+    """
     try:
+        # attempt to fetch live train data; this will use CFR first
+        live = None
+        try:
+            live = get_train(train_id)
+        except Exception:
+            live = None
+        if live and live.get('composition_html'):
+            resp = {
+                'train_number': train_id,
+                'composition_html': live['composition_html'],
+                'services': live.get('services', []),
+                'data_source': live.get('data_source')
+            }
+            if live.get('coach_order'):
+                resp['coach_order'] = live['coach_order']
+            if live.get('coach_classes'):
+                resp['coach_classes'] = live['coach_classes']
+            if live.get('station_options'):
+                resp['station_options'] = live['station_options']
+            return jsonify(resp)
+
+        # fallback to synthetic demo
         composition = get_train_composition(train_id)
         return jsonify(composition)
     except Exception as e:
@@ -1309,7 +1498,7 @@ def search_stations(query):
         def normalize_str(s):
             return unicodedata.normalize('NFKD', s).encode('ASCII', 'ignore').decode('utf-8').lower()
             
-        matching_stations = []
+        matching_stations: list[dict] = []
         query_norm = normalize_str(query)
         
         # Point 'bucuresti nord' queries to 'bucuresti nord gr.a'
@@ -1317,7 +1506,7 @@ def search_stations(query):
             query_norm = "bucuresti nord gr.a"
         
         for station in stations:
-            station_name_norm = normalize_str(station["name"])
+            station_name_norm = normalize_str(str(station.get("name", "")))
             if query_norm in station_name_norm:
                 # Calculate relevance score
                 score = 100
@@ -1341,26 +1530,12 @@ def search_stations(query):
         return jsonify([])
 
 
-# Enhanced train search (Redirected to manual lookup)
+# Enhanced train search (legacy path — kept for back-compat, delegates to /api/search/trains)
 @app.route('/api/trains/search/<string:query>')
-def search_trains(query):
-    """Search trains by number with live Infofer data as the target"""
-    if len(query) < 2:
-        return jsonify([])
-    
-    try:
-        query_clean = query.upper().strip()
-        # Return a list of suggestions based on the query as a number
-        results = [{
-            "train_number": query_clean,
-            "route": f"Verifică traseul live pentru trenul {query_clean}",
-            "operator": "Interogare Infofer",
-            "id": query_clean
-        }]
-        return jsonify(results)
-    except Exception as e:
-        logger.error(f"Error in train search for query '{query}': {e}")
-        return jsonify([])
+def search_trains_legacy(query):
+    """Legacy train search route — redirects to the canonical normalised endpoint."""
+    from flask import redirect, url_for
+    return redirect(url_for('search_trains_with_date', q=query))
 
 
 # Passenger Reports and Social Features (Waze-like functionality)
@@ -1690,6 +1865,43 @@ def add_train_report(train_id):
     except Exception as e:
         logger.error(f"Error adding report: {e}")
         return jsonify({"error": str(e)}), 500
+
+@app.route('/api/station-by-name/<path:station_name>')
+def get_station_timetable_by_name(station_name):
+    """
+    Get station timetable by station name (URL-decoded).
+    This is the correct endpoint to use from the mobile app — it passes the
+    human-readable name directly to the Infofer scraper, which converts it to
+    the right slug. This avoids the fake numeric ID problem entirely.
+    """
+    try:
+        from urllib.parse import unquote
+        decoded_name = unquote(station_name)
+        logger.info(f"Fetching timetable by name: '{decoded_name}'")
+
+        timetable = StationTimetableGetter.get_timetable(
+            station_id=decoded_name,   # used as fallback key only
+            station_name=decoded_name  # this drives the actual Infofer slug
+        )
+
+        if not timetable:
+            return jsonify({
+                "error": "No train data found",
+                "message": f"No active trains found for '{decoded_name}' on Infofer live boards",
+                "station_name": decoded_name
+            }), 404
+
+        for item in timetable:
+            item['is_live'] = True
+
+        return jsonify(timetable)
+
+    except Exception as e:
+        logger.error(f"Failed to get timetable for station name '{station_name}': {e}")
+        return jsonify({
+            "error": "Timetable data unavailable",
+            "message": str(e)
+        }), 500
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)

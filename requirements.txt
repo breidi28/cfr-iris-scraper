@@ -8,3 +8,5 @@ gunicorn>=21.2
 requests_html>=0.10
 lxml_html_clean
 lxml[html_clean]
+Flask-Compress>=1.14
+cachetools>=7.0.0
