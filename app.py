@@ -1873,23 +1873,25 @@ def get_station_timetable_by_name(station_name):
     This is the correct endpoint to use from the mobile app — it passes the
     human-readable name directly to the Infofer scraper, which converts it to
     the right slug. This avoids the fake numeric ID problem entirely.
+
+    Optional query param:
+      ?date=DD.MM.YYYY  — fetch timetable for a specific date (defaults to today)
     """
     try:
         from urllib.parse import unquote
         decoded_name = unquote(station_name)
-        logger.info(f"Fetching timetable by name: '{decoded_name}'")
+        date_str = request.args.get('date')  # e.g. "01.03.2026"
+        logger.info(f"Fetching timetable by name: '{decoded_name}', date: {date_str}")
 
         timetable = StationTimetableGetter.get_timetable(
             station_id=decoded_name,   # used as fallback key only
-            station_name=decoded_name  # this drives the actual Infofer slug
+            station_name=decoded_name, # this drives the actual Infofer slug
+            date_str=date_str          # None falls back to today inside the scraper
         )
 
         if not timetable:
-            return jsonify({
-                "error": "No train data found",
-                "message": f"No active trains found for '{decoded_name}' on Infofer live boards",
-                "station_name": decoded_name
-            }), 404
+            # Return an empty list so the app can show "no trains" instead of an error
+            return jsonify([])
 
         for item in timetable:
             item['is_live'] = True
