@@ -12,6 +12,8 @@ import os
 import random
 import threading
 import re
+import requests
+import requests.exceptions as req_exc
 
 app = Flask(__name__)
 CORS(app)
@@ -399,14 +401,33 @@ def get_train_enhanced(train_id):
         else:
             return jsonify({
                 "error": f"Train {train_id} not found",
-                "message": "Train not found on official Infofer live boards",
+                "error_code": "not_found",
+                "message": "This train was not found on the official Infofer live boards. It may not be running today.",
                 "data_source": "infofer_live"
             }), 404
             
+    except req_exc.ConnectionError as e:
+        logger.error(f"Service unreachable while fetching train {train_id}: {e}")
+        return jsonify({
+            "error": "Data source unreachable",
+            "error_code": "service_down",
+            "message": "The CFR / Infofer data source is currently unreachable. The service may be down for maintenance.",
+            "details": str(e)
+        }), 503
+    except req_exc.Timeout as e:
+        logger.error(f"Timeout while fetching train {train_id}: {e}")
+        return jsonify({
+            "error": "Request timed out",
+            "error_code": "timeout",
+            "message": "The request to the CFR / Infofer server timed out. The server may be under heavy load.",
+            "details": str(e)
+        }), 504
     except Exception as e:
         logger.error(f"Error fetching train data for {train_id}: {e}")
         return jsonify({
             "error": f"Unable to process request for train {train_id}",
+            "error_code": "server_error",
+            "message": "An unexpected error occurred while fetching train data.",
             "details": str(e)
         }), 500
 
@@ -432,10 +453,6 @@ def get_data_validity():
             "error": "Failed to get data validity information",
             "details": str(e)
         }), 500
-
-
-
-
 
 @app.route('/api/search/trains')
 def search_trains_with_date():
@@ -1898,11 +1915,29 @@ def get_station_timetable_by_name(station_name):
 
         return jsonify(timetable)
 
+    except req_exc.ConnectionError as e:
+        logger.error(f"Service unreachable while fetching station '{station_name}': {e}")
+        return jsonify({
+            "error": "Data source unreachable",
+            "error_code": "service_down",
+            "message": "The Infofer data source is currently unreachable. The service may be down for maintenance.",
+            "details": str(e)
+        }), 503
+    except req_exc.Timeout as e:
+        logger.error(f"Timeout while fetching station '{station_name}': {e}")
+        return jsonify({
+            "error": "Request timed out",
+            "error_code": "timeout",
+            "message": "The request to the Infofer server timed out. The server may be under heavy load.",
+            "details": str(e)
+        }), 504
     except Exception as e:
         logger.error(f"Failed to get timetable for station name '{station_name}': {e}")
         return jsonify({
             "error": "Timetable data unavailable",
-            "message": str(e)
+            "error_code": "server_error",
+            "message": "An unexpected error occurred while fetching station data.",
+            "details": str(e)
         }), 500
 
 if __name__ == '__main__':
